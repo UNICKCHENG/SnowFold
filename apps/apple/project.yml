@@ -95,6 +95,18 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.snowfold.snapshots
         TEST_TARGET_NAME: SnowFold-iOS
+  # 审计分支专用：Mac 弹层（添加资产/订阅编辑）XCUITest 截图；不改产品代码与既有测试。
+  SnowFoldSnapshots-macOS:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: Tests/SnowFoldSnapshots-macOS
+    dependencies:
+      - target: SnowFold-macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.snowfold.snapshots-macos
+        TEST_TARGET_NAME: SnowFold-macOS
   SnowFoldKeychainUI-iOS:
     type: bundle.ui-testing
     platform: iOS
@@ -139,6 +151,13 @@ schemes:
     test:
       targets:
         - SnowFoldSnapshots-iOS
+  SnowFold-macOS-snapshots:
+    build:
+      targets:
+        SnowFold-macOS: all
+    test:
+      targets:
+        - SnowFoldSnapshots-macOS
   SnowFold-keychain-iOS:
     build:
       targets:

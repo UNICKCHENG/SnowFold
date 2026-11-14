@@ -114,6 +114,7 @@ for (name, cents, currency, cycle, next) in subscriptionSpecs {
 
 // 本机主题与密钥：让截图与真实使用一致。
 try core.saveTheme(theme: .system)
-_ = try core.exportSealed()
+// 审计分支改动：CI 临时签名可能没有钥匙串写权限；造数不依赖同步密钥，导出失败不阻断。
+_ = try? core.exportSealed()
 let overview = try core.overview(on: dayString(Date()))
 print("seeded: \(overview.totalAssetsCents) cents assets, \(overview.activeSubscriptions) active subs, \(overview.pausedSubscriptions) paused")

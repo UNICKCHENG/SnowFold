@@ -6,7 +6,8 @@ UDID="$1"; PREFIX="$2"; KIND="$3"; LOOK="$4"; AX="${5:-}"
 APPLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DERIVED_DATA="${DERIVED_DATA:-$APPLE_ROOT/.build/supplement}"
 FIXTURE="${FIXTURE:-$APPLE_ROOT/.build/long-data-v2}"
-DEST="/Users/cheng/Documents/github/billfold/.fullstack/layout/shots/apple-full"
+# 输出目录可由 SNOWFOLD_SHOTS_DEST 覆盖；默认仍落仓库 .build 下，便于本机试跑。
+DEST="${SNOWFOLD_SHOTS_DEST:-$APPLE_ROOT/.build/shots-out}"
 xcrun simctl list devices -j | python3 -I -c 'import json,sys; uid=sys.argv[1]; devices=[d for rows in json.load(sys.stdin)["devices"].values() for d in rows]; assert any(d["udid"]==uid and "snowfold-apple" in d["name"] for d in devices), "refusing unowned simulator"' "$UDID"
 xcrun simctl boot "$UDID" 2>/dev/null || true
 xcrun simctl bootstatus "$UDID" -b >/dev/null
