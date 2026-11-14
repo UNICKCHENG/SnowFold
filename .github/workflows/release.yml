@@ -134,7 +134,8 @@ jobs:
           trap 'rm -f "$SNOWFOLD_ANDROID_KEYSTORE_FILE"' EXIT
           python3 "$GITHUB_WORKSPACE/.github/scripts/release.py" decode-keystore
           ./gradlew --no-daemon assembleRelease
-          apk=app/build/outputs/apk/release/app-release.apk
+          # build.gradle.kts 把 release 产物改名为 SnowFold-android.apk。
+          apk=app/build/outputs/apk/release/SnowFold-android.apk
           apksigner=$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
           "$apksigner" verify --verbose "$apk"
           mkdir -p "$GITHUB_WORKSPACE/dist"
