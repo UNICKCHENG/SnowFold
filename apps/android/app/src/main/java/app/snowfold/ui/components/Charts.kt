@@ -32,6 +32,7 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -108,69 +109,62 @@ fun CompositionDonut(
     }
 }
 
-/** 日期轴上的每个标记代表核心 upcoming 返回的一笔扣费，不汇总日金额。 */
+/**
+ * 扣费柱状图（docs/mobile-layout.md §8，对齐 iPad/iPhone）：核心 upcoming 按自然日分桶，
+ * 柱高 = 当天笔数（笔数在界面统计，金额仍只用核心值）；x 轴范围取这几笔的日期跨度，
+ * 柱子沿横轴铺开；逾期钳到最早一天并用负值色，其余品牌蓝；日期标签 M月d日。
+ */
 @Composable
-fun UpcomingTimeline(
+fun UpcomingBarChart(
     charges: List<UpcomingUi>,
     today: LocalDate,
     modifier: Modifier = Modifier,
-    plotHeight: Dp = 56.dp,
+    plotHeight: Dp = 160.dp,
 ) {
     val colors = appColors()
-    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
-    val selected = charges.firstOrNull { it.id == selectedId } ?: charges.firstOrNull()
-    val description = stringResource(R.string.timeline_description)
-    val entries = charges.joinToString("；") { "${it.date} ${it.name} ${it.amountText}" }
+    data class Bucket(val offset: Int, val count: Int, val overdue: Boolean)
+    val buckets = buildList {
+        val byDay = sortedMapOf<Int, IntArray>()
+        charges.forEach { charge ->
+            val raw = java.time.temporal.ChronoUnit.DAYS.between(today, charge.date).toInt()
+            val clamped = raw.coerceAtLeast(0)
+            val entry = byDay.getOrPut(clamped) { intArrayOf(0, 0) }
+            entry[0] += 1
+            if (raw < 0) entry[1] = 1
+        }
+        byDay.forEach { (day, v) -> add(Bucket(day, v[0], v[1] == 1)) }
+    }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(description, style = SnowFoldType.helper, color = colors.ink2)
-        Canvas(
-            Modifier.fillMaxWidth().height(plotHeight)
-                .semantics { contentDescription = "$description；$entries" }
-                .pointerInput(charges) {
-                    detectTapGestures { position ->
-                        selectedId = charges.minByOrNull {
-                            val day = ChronoUnit.DAYS.between(today, it.date).coerceIn(0, 29)
-                            kotlin.math.abs(position.x / size.width - day / 29f)
-                        }?.id
-                    }
-                },
-        ) {
-            val inset = 5.dp.toPx()
-            val usable = size.width - 2 * inset
-            drawLine(colors.hairline, Offset(inset, size.height - 2.dp.toPx()), Offset(size.width - inset, size.height - 2.dp.toPx()), 1.dp.toPx())
-            charges.forEachIndexed { index, charge ->
-                val day = ChronoUnit.DAYS.between(today, charge.date).coerceIn(0, 29)
-                val x = inset + usable * day / 29f
-                val tint = when {
-                    charge.date < today -> colors.negative
-                    charge.date == today -> colors.accent
-                    else -> colors.accent
+        if (buckets.isEmpty()) {
+            Text(stringResource(R.string.no_upcoming_charges), style = SnowFoldType.helper, color = colors.ink2,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), textAlign = TextAlign.Center)
+        } else {
+            val minD = buckets.first().offset
+            val maxD = buckets.last().offset
+            val span = (maxD - minD).coerceAtLeast(1)
+            val maxCount = buckets.maxOf { it.count }.coerceAtLeast(1)
+            Canvas(Modifier.fillMaxWidth().height(plotHeight)) {
+                val inset = 4.dp.toPx()
+                val usable = size.width - 2 * inset
+                buckets.forEach { bucket ->
+                    val x = inset + usable * (bucket.offset - minD) / span.toFloat()
+                    val barHeight = size.height * 0.9f * bucket.count / maxCount
+                    val width = 8.dp.toPx()
+                    drawRoundRect(
+                        color = if (bucket.overdue) colors.negative else colors.accent,
+                        topLeft = Offset(x - width / 2, size.height - barHeight),
+                        size = Size(width, barHeight),
+                        cornerRadius = CornerRadius(2.dp.toPx()),
+                    )
                 }
-                // 同一天的多笔使用不同高度，仍保持各自标记，不相加金额。
-                val height = size.height * (0.45f + (index % 3) * 0.2f)
-                drawLine(tint.copy(alpha = if (charge.id == selected?.id) 1f else 0.55f),
-                    Offset(x, size.height - 2.dp.toPx()), Offset(x, size.height - height), 3.dp.toPx(), StrokeCap.Round)
-                drawCircle(tint, 4.dp.toPx(), Offset(x, size.height - height))
             }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            listOf(0L, 9L, 19L, 29L).forEach { offset ->
-                if (offset == 0L) {
-                    Text(stringResource(R.string.today), style = SnowFoldType.helper, color = colors.ink2)
-                } else {
-                    val date = today.plusDays(offset)
-                    Text("${date.monthValue}/${date.dayOfMonth}", style = SnowFoldType.helper, color = colors.ink2)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                listOf(minD, minD + span / 3, minD + span * 2 / 3, maxD).distinct().forEach { offset ->
+                    val date = today.plusDays(offset.toLong())
+                    Text(dateShort(date), style = SnowFoldType.helper.copy(fontFeatureSettings = "tnum"), color = colors.ink2)
                 }
             }
         }
-        charges.distinctBy { it.id }.forEach { charge ->
-            val tint = if (charge.date < today) colors.negative else colors.ink
-            Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                Text("${dateShort(charge.date)} · ${charge.name}", style = SnowFoldType.helper, color = tint)
-                AmountText(charge.amountText, SnowFoldType.rowValue, Modifier.fillMaxWidth(), tint)
-            }
-        }
-        if (charges.isEmpty()) Text(stringResource(R.string.no_upcoming_charges), style = SnowFoldType.helper, color = colors.ink2)
     }
 }
 
@@ -198,25 +192,16 @@ fun AnnualBars(
         return
     }
     val maxAnnual = items.maxOf { it.second }.coerceAtLeast(1L)
-    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         items.forEach { (name, annual, amountText) ->
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(
-                    text = name.take(12),
+                    text = if (name.length > 12) name.take(11) + "…" else name,
                     style = SnowFoldType.helper,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.width(96.dp),
                 )
-                Box(modifier = Modifier.weight(1f).height(10.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(annual.toFloat() / maxAnnual)
-                            .height(10.dp)
-                            .background(barColor, RoundedCornerShape(4.dp)),
-                    )
-                }
                 Text(
                     text = amountText,
                     style = SnowFoldType.helper.copy(fontFeatureSettings = "tnum"),
@@ -224,6 +209,14 @@ fun AnnualBars(
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                 )
+                Box(modifier = Modifier.fillMaxWidth().height(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(annual.toFloat() / maxAnnual)
+                            .height(6.dp)
+                            .background(barColor, RoundedCornerShape(4.dp)),
+                    )
+                }
             }
         }
     }

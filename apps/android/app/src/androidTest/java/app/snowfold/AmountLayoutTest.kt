@@ -104,7 +104,7 @@ class AmountLayoutTest {
         compose.setContent {
             SnowFoldTheme {
                 CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, scale)) {
-                    OverviewScreen(ui, null, null, {}, {}, {}, false, Modifier.width(360.dp))
+                    OverviewScreen(ui, null, null, {}, {}, {}, expanded = false, modifier = Modifier.width(360.dp))
                 }
             }
         }

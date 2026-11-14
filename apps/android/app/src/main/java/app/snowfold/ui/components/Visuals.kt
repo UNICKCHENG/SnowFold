@@ -125,9 +125,9 @@ private fun FittedAmount(
             // multiplying an initial width by a ratio, which can strand the final digit.
             when {
                 widthPx == Constraints.Infinity || fits(1f) -> 1f to false
-                !fits(0.6f) -> 0.6f to true
+                !fits(0.45f) -> 0.45f to true
                 else -> {
-                    var lower = 0.6f
+                    var lower = 0.45f
                     var upper = 1f
                     repeat(9) {
                         val middle = (lower + upper) / 2f

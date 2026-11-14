@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     vm: MainViewModel,
     onBack: () -> Unit,
+    showClose: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val tokens = appColors()
@@ -140,8 +141,10 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(DesignTokens.space3),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) {
-                Text(stringResource(R.string.close), style = SnowFoldType.body, color = tokens.accent)
+            if (showClose) {
+                TextButton(onClick = onBack) {
+                    Text(stringResource(R.string.close), style = SnowFoldType.body, color = tokens.accent)
+                }
             }
             Text(stringResource(R.string.settings_title), style = SnowFoldType.statValue, color = tokens.ink, modifier = Modifier.padding(start = 4.dp))
         }

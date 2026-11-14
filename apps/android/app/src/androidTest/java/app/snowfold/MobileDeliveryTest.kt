@@ -115,7 +115,12 @@ class MobileDeliveryTest {
         shot("06-subscription-editor")
         // Phone editor is modal; on tablets the same form is embedded in the right pane.
         if (compose.onAllNodesWithTag("editor-sheet").fetchSemanticsNodes().isNotEmpty()) Espresso.pressBack()
-        compose.onNodeWithContentDescription(text(R.string.cd_settings)).performClick()
+        // §8 intentionally moves tablet settings from the toolbar to the sidebar.
+        if (compose.onAllNodesWithTag("nav-settings").fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNodeWithTag("nav-settings").performClick()
+        } else {
+            compose.onNodeWithContentDescription(text(R.string.cd_settings)).performClick()
+        }
         pages("settings-list", "07-settings")
     }
 
@@ -166,7 +171,7 @@ class MobileDeliveryTest {
 
     @Test fun duplicateSaveAndTwoDeletesUndoOnlyLatest() {
         nav("assets")
-        compose.onNodeWithContentDescription(text(R.string.add)).performClick()
+        compose.onNodeWithTag("assets-add").performClick()
         compose.onNodeWithTag("sheet-toggle").performClick()
         field(R.string.name_label).performTextReplacement("连点只写一笔")
         field(R.string.amount_label).performTextReplacement("12.34")

@@ -3,6 +3,7 @@
 package app.snowfold.ui.editors
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -52,6 +54,7 @@ import app.snowfold.ui.components.Haptics
 import app.snowfold.ui.components.appColors
 import app.snowfold.ui.components.categoryTint
 import app.snowfold.ui.model.AssetUi
+import app.snowfold.ui.model.categoryLabelRes
 import app.snowfold.ui.theme.DesignTokens
 import app.snowfold.ui.theme.SnowFoldType
 
@@ -176,25 +179,46 @@ private fun AssetDetail(vm: MainViewModel, asset: AssetUi, target: Editor.Asset,
     val busy by vm.busy.collectAsStateWithLifecycle()
     val view = LocalView.current
 
-    Text(
-        text = asset.name,
-        style = SnowFoldType.statValue,
-        color = tokens.ink,
-    )
-    AmountText(
-        value = asset.amountText,
-        style = SnowFoldType.hero.copy(fontSize = SnowFoldType.cardNumber.fontSize * 1.4f),
-        color = tokens.ink,
-        modifier = Modifier.padding(top = 8.dp),
-    )
-    Button(
-        onClick = { changingBalance = !changingBalance }, enabled = !busy,
-        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = tokens.ink, contentColor = tokens.canvas),
-        shape = RoundedCornerShape(9.dp),
-    ) { Text(stringResource(R.string.adjust_balance)) }
-    TextButton(onClick = { renaming = !renaming }, enabled = !busy) {
-        Text(stringResource(R.string.cd_rename), color = tokens.ink2)
+    // D：详情上半部分放进白色卡片（名称、分类标签、金额、黑色主按钮、居中重命名胶囊）。
+    app.snowfold.ui.components.AppCard {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                text = asset.name,
+                style = SnowFoldType.statValue,
+                color = tokens.ink,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val tint = app.snowfold.ui.components.categoryTint(asset.categoryIndex, tokens)
+                Box(Modifier.size(24.dp).background(tint.second, RoundedCornerShape(7.dp)), contentAlignment = Alignment.Center) {
+                    Icon(appIcon(app.snowfold.ui.components.AppIcon.category(asset.categoryIndex)), null, tint = tint.first, modifier = Modifier.size(14.dp))
+                }
+                Text(stringResource(categoryLabelRes(app.snowfold.ui.model.CATEGORY_CODES.getOrNull(asset.categoryIndex) ?: "cash")), style = SnowFoldType.helper, color = tokens.ink2)
+            }
+            AmountText(
+                value = asset.amountText,
+                style = SnowFoldType.hero.copy(fontSize = SnowFoldType.cardNumber.fontSize * 1.4f),
+                color = tokens.ink,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = { changingBalance = !changingBalance }, enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = tokens.ink, contentColor = tokens.canvas),
+                shape = RoundedCornerShape(9.dp),
+            ) {
+                Icon(appIcon(app.snowfold.ui.components.AppIcon.refreshCw), null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.adjust_balance))
+            }
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Button(
+                    onClick = { renaming = !renaming }, enabled = !busy,
+                    colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color.Transparent, contentColor = tokens.ink),
+                    shape = RoundedCornerShape(99.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, tokens.hairline),
+                ) { Text(stringResource(R.string.menu_rename)) }
+            }
+        }
     }
     if (renaming) {
         FormField(name, { name = it }, stringResource(R.string.name_label))
@@ -243,80 +267,72 @@ private fun AssetDetail(vm: MainViewModel, asset: AssetUi, target: Editor.Asset,
             color = tokens.ink2,
             modifier = Modifier.padding(top = 20.dp, bottom = 4.dp),
         )
-        asset.history.forEachIndexed { index, entry ->
-            val isCurrent = entry.isCurrent
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 6.dp).clickable { vm.openCorrection(entry.id) }.testTag("history-${entry.id}"),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = runCatching {
-                                java.time.OffsetDateTime.parse(entry.recordedAt).toLocalDateTime()
-                                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
-                            }.getOrDefault(entry.recordedAt) + if (isCurrent) "  " + stringResource(R.string.history_current) else "",
-                            style = SnowFoldType.helper,
-                            color = tokens.ink2,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = entry.deltaText ?: stringResource(R.string.history_initial),
-                            style = SnowFoldType.helper.copy(fontFeatureSettings = "tnum"),
-                            color = tokens.ink3,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                    }
-                    AmountText(entry.amountText, SnowFoldType.rowValue, Modifier.weight(0.9f), tokens.ink)
-                    TextButton(
-                        onClick = { vm.openCorrection(entry.id) },
-                        enabled = !busy,
+        // D：变动记录放进白色卡片；行 = 日期（当前带标签）、金额、正负变动（颜色区分）、「修正」。
+        app.snowfold.ui.components.AppCard {
+            Column(Modifier.padding(vertical = 4.dp)) {
+                asset.history.forEachIndexed { index, entry ->
+                    if (index > 0) androidx.compose.material3.HorizontalDivider(
+                        color = tokens.hairline, modifier = Modifier.padding(start = 16.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                            .clickable { vm.openCorrection(entry.id) }.testTag("history-${entry.id}"),
                     ) {
-                        Text(
-                            stringResource(R.string.correct_history),
-                            style = SnowFoldType.helper,
-                            color = tokens.accent,
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = runCatching {
+                                    java.time.OffsetDateTime.parse(entry.recordedAt).toLocalDateTime()
+                                        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+                                }.getOrDefault(entry.recordedAt),
+                                style = SnowFoldType.helper.copy(fontFeatureSettings = "tnum"),
+                                color = tokens.ink2,
+                            )
+                            if (entry.isCurrent) {
+                                Text(
+                                    text = stringResource(R.string.history_current),
+                                    style = SnowFoldType.helper,
+                                    color = tokens.accent,
+                                    modifier = Modifier
+                                        .padding(start = 8.dp)
+                                        .background(tokens.accent.copy(alpha = 0.12f), RoundedCornerShape(99.dp))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
+                        AmountText(
+                            value = entry.amountText,
+                            style = SnowFoldType.rowValue,
+                            color = tokens.ink,
+                            modifier = Modifier.padding(top = 4.dp),
                         )
+                        if (entry.deltaText != null) {
+                            Text(
+                                text = entry.deltaText,
+                                style = SnowFoldType.helper.copy(fontFeatureSettings = "tnum"),
+                                color = if (entry.deltaText.startsWith("+")) tokens.positive else tokens.negative,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        } else {
+                            Text(
+                                text = stringResource(R.string.history_initial),
+                                style = SnowFoldType.helper,
+                                color = tokens.ink2,
+                            )
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Text(
+                                text = stringResource(R.string.correct_history),
+                                style = SnowFoldType.helper,
+                                color = tokens.accent,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .padding(top = 6.dp)
+                                    .clickable { vm.openCorrection(entry.id) }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                            )
+                        }
                     }
-                }
-                TextButton(onClick = { expandedHistoryId = if (expandedHistoryId == entry.id) null else entry.id }) {
-                    Text(stringResource(R.string.corrections_toggle), style = SnowFoldType.helper)
-                }
-                if (expandedHistoryId == entry.id) CorrectionHistory(vm, entry.id)
-            }
-        }
-    }
-    editingHistoryId?.let { historyId ->
-        val entry = asset.history.firstOrNull { it.id == historyId }
-        if (entry != null) {
-            var correctionAmount by rememberEditorField(vm, "correction:$historyId", "amount", entry.amountPlain)
-            val correctionSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = false)
-            androidx.compose.material3.ModalBottomSheet(
-                onDismissRequest = vm::closeCorrection,
-                sheetState = correctionSheetState,
-                containerColor = tokens.card,
-                shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
-            ) {
-                Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-                    SheetNavBar(
-                        stringResource(R.string.correction_sheet_title),
-                        onCancel = vm::closeCorrection,
-                        onSave = {
-                            vm.correctHistory(historyId, correctionAmount.trim())
-                        },
-                        saveEnabled = !busy && correctionAmount.isNotBlank(),
-                    )
-                    Text(displayTimestamp(entry.recordedAt), style = SnowFoldType.helper, color = tokens.ink3, modifier = Modifier.padding(top = 4.dp))
-                    Text(
-                        stringResource(R.string.history_current) + " " + entry.amountText,
-                        style = SnowFoldType.helper, color = tokens.ink2, modifier = Modifier.padding(top = 2.dp),
-                    )
-                    FormField(value = correctionAmount, onValueChange = { correctionAmount = it }, label = stringResource(R.string.amount_label), amount = true)
-                    EditorErrorLine(error)
-                    CorrectionHistory(vm, historyId)
-                    Spacer(Modifier.height(16.dp))
                 }
             }
         }
@@ -331,6 +347,35 @@ private fun AssetDetail(vm: MainViewModel, asset: AssetUi, target: Editor.Asset,
             modifier = Modifier.padding(horizontal = 8.dp),
         ) {
             Text(stringResource(R.string.cd_delete_asset), color = tokens.negative)
+        }
+    }
+    val correction = asset.history.firstOrNull { it.id == editingHistoryId }
+    if (correction != null) {
+        HistoryCorrectionSheet(vm, correction, error)
+    }
+}
+
+/** Independent form; only a successful core write closes it. */
+@Composable
+private fun HistoryCorrectionSheet(vm: MainViewModel, entry: app.snowfold.ui.model.HistoryUi, error: app.snowfold.UiMessage?) {
+    var amount by rememberEditorField(vm, "correction.${entry.id}", "amount", entry.amountPlain)
+    val busy by vm.busy.collectAsStateWithLifecycle()
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = vm::closeCorrection,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = appColors().card,
+        modifier = Modifier.testTag("correction-sheet"),
+    ) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            SheetNavBar(
+                stringResource(R.string.correction_sheet_title), vm::closeCorrection,
+                onSave = { vm.correctHistory(entry.id, amount.trim()) },
+                saveEnabled = !busy && amount.isNotBlank(),
+            )
+            FormField(amount, { amount = it }, stringResource(R.string.amount_label), amount = true)
+            EditorErrorLine(error)
+            CorrectionHistory(vm, entry.id)
+            Spacer(Modifier.height(24.dp))
         }
     }
 }

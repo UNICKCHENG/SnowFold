@@ -2,6 +2,7 @@ package app.snowfold.ui.nav
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -42,7 +43,10 @@ private val NAV_ITEMS = listOf(
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-fun AppRoot(vm: MainViewModel, expanded: Boolean) {
+fun AppRoot(vm: MainViewModel, expanded: Boolean, wideTablet: Boolean = false) {
+    // §8 新规则：内容区宽度 = 窗口宽度 − 侧边栏宽度（216dp），不在滚动列里测量。
+    val windowWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
+    val contentWidth = windowWidth - if (expanded) 216 else 0
     val state by vm.state.collectAsStateWithLifecycle()
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
@@ -67,27 +71,12 @@ fun AppRoot(vm: MainViewModel, expanded: Boolean) {
         is AppState.Ready -> {
             BackHandler(settingsOpen) { settingsOpen = false }
             Row(Modifier.fillMaxSize()) {
-                if (expanded) NavigationRail(containerColor = colors.card, modifier = Modifier.fillMaxHeight()) {
-                    (NAV_ITEMS + NavItem(ROUTE_SETTINGS, AppIcon.settings, R.string.settings_title)).forEach { item ->
-                        val isSettings = item.route == ROUTE_SETTINGS
-                        NavigationRailItem(
-                            selected = if (isSettings) settingsOpen else !settingsOpen && route == item.route,
-                            onClick = {
-                                if (isSettings) settingsOpen = true else {
-                                    settingsOpen = false
-                                    nav.navigateToTab(item.route)
-                                }
-                            },
-                            icon = { Icon(item.icon, null) },
-                            label = { Text(stringResource(item.label), style = SnowFoldType.badge) },
-                            modifier = Modifier.testTag("nav-${item.route}"),
-                            colors = NavigationRailItemDefaults.colors(
-                                selectedIconColor = colors.accent, selectedTextColor = colors.accent,
-                                unselectedIconColor = colors.ink2, unselectedTextColor = colors.ink2,
-                                indicatorColor = colors.accent.copy(alpha = 0.14f)),
-                        )
-                    }
-                }
+                if (expanded) SnowSidebar(
+                    route = route,
+                    settingsOpen = settingsOpen,
+                    onNavigate = { settingsOpen = false; nav.navigateToTab(it) },
+                    onSettings = { settingsOpen = true },
+                )
                 Scaffold(
                     modifier = Modifier.weight(1f),
                     containerColor = colors.canvas,
@@ -114,26 +103,30 @@ fun AppRoot(vm: MainViewModel, expanded: Boolean) {
                 ) { padding ->
                     Row(Modifier.padding(padding).consumeWindowInsets(padding)) {
                         Box(Modifier.weight(1f).fillMaxHeight()) {
-                            AppNavGraph(vm, expanded && !settingsOpen, nav,
-                                onOpenSettings = { settingsOpen = true }, hideEditor = settingsOpen)
-                        }
-                        if (expanded && settingsOpen) Surface(
-                            color = colors.card, modifier = Modifier.weight(1f).fillMaxHeight().testTag("settings-pane"),
-                        ) {
-                            app.snowfold.ui.settings.SettingsScreen(vm, onBack = { settingsOpen = false })
+                            // §8 新规则：内容区 ≥680dp 用列表+详情双栏（列表 ≥320、详情 ≥360）；<680 推入整页。
+                            val paneLayout = expanded && contentWidth >= 680
+                            if (expanded && settingsOpen) {
+                                Box(Modifier.fillMaxSize().testTag("settings-pane")) {
+                                    app.snowfold.ui.settings.SettingsScreen(vm, onBack = { settingsOpen = false }, showClose = false,
+                                        modifier = Modifier.fillMaxSize())
+                                }
+                            } else {
+                                AppNavGraph(vm, expanded, paneLayout, contentWidth, nav,
+                                    onOpenSettings = { settingsOpen = true }, hideEditor = settingsOpen)
+                            }
+                            if (settingsOpen && !expanded) {
+                                val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                                ModalBottomSheet(
+                                    onDismissRequest = { settingsOpen = false }, sheetState = sheet, containerColor = colors.card,
+                                    modifier = Modifier.testTag("settings-sheet"),
+                                    shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+                                ) {
+                                    app.snowfold.ui.settings.SettingsScreen(vm, onBack = { settingsOpen = false },
+                                        modifier = Modifier.fillMaxHeight())
+                                }
+                            } else if (!settingsOpen) EditorSheets(vm, paneLayout)
                         }
                     }
-                    if (settingsOpen && !expanded) {
-                        val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-                        ModalBottomSheet(
-                            onDismissRequest = { settingsOpen = false }, sheetState = sheet, containerColor = colors.card,
-                            modifier = Modifier.testTag("settings-sheet"),
-                            shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
-                        ) {
-                            app.snowfold.ui.settings.SettingsScreen(vm, onBack = { settingsOpen = false },
-                                modifier = Modifier.fillMaxHeight())
-                        }
-                    } else if (!settingsOpen) EditorSheets(vm, expanded)
                     ConfirmDialogs(vm)
                 }
             }
@@ -163,6 +156,8 @@ private fun FeedbackBars(vm: MainViewModel, notice: UiMessage?, onDismiss: () ->
 private fun AppNavGraph(
     vm: MainViewModel,
     expanded: Boolean,
+    paneLayout: Boolean,
+    contentWidth: Int,
     nav: androidx.navigation.NavHostController,
     onOpenSettings: () -> Unit,
     hideEditor: Boolean,
@@ -175,12 +170,12 @@ private fun AppNavGraph(
     val editor by vm.editor.collectAsStateWithLifecycle()
     NavHost(nav, startDestination = ROUTE_OVERVIEW) {
         composable(ROUTE_OVERVIEW) {
-            app.snowfold.ui.overview.OverviewScreen(ui, banner, overflow, onOpenSettings,
+            app.snowfold.ui.overview.OverviewScreen(ui, banner, overflow, onOpenSettings, wideTablet = expanded, contentWidth = contentWidth,
                 onGoAssets = { vm.closeEditor(); nav.navigateToTab("$ROUTE_ASSETS?focus=$it") },
                 onGoSubscriptions = { vm.closeEditor(); nav.navigateToTab("$ROUTE_SUBSCRIPTIONS?focus=$it") }, expanded = expanded)
         }
         composable("$ROUTE_ASSETS?focus={focus}", arguments = listOf(navArgument("focus") { type = NavType.IntType; defaultValue = -1 })) { entry ->
-            app.snowfold.ui.assets.AssetsScreen(vm, ui, banner, onOpenSettings,
+            app.snowfold.ui.assets.AssetsScreen(vm, ui, banner, onOpenSettings, paneLayout = paneLayout,
                 onNewAsset = { vm.openEditor(Editor.NewAsset(it)) },
                 onOpenAsset = { vm.openEditor(Editor.Asset(it)) },
                 onDeleteAsset = vm::deleteAsset,
@@ -195,9 +190,9 @@ private fun AppNavGraph(
                     onOpenSubscription = { vm.openEditor(Editor.Subscription(it)) },
                     onRenew = vm::renewSubscription, onPauseToggle = vm::setSubscriptionPaused, onDelete = vm::deleteSubscription,
                     selectedSubscriptionId = (editor as? Editor.Subscription)?.id,
-                    expanded = expanded, focusGroup = entry.arguments?.getInt("focus") ?: -1,
+                    expanded = expanded, paneLayout = paneLayout, focusGroup = entry.arguments?.getInt("focus") ?: -1,
                     modifier = Modifier.weight(1f))
-                if (expanded) Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(16.dp).testTag("subscription-pane")) {
+                if (paneLayout) Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(16.dp).testTag("subscription-pane")) {
                     val target = editor
                     if (target is Editor.Subscription || target is Editor.NewSubscription) {
                         key(target) { SubscriptionEditorContent(vm, target, { id -> ui.subscriptions.firstOrNull { it.id == id } }) }
@@ -220,8 +215,8 @@ private fun androidx.navigation.NavHostController.navigateToTab(route: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EditorSheets(vm: MainViewModel, expanded: Boolean) {
-    if (expanded) return
+private fun EditorSheets(vm: MainViewModel, paneLayout: Boolean) {
+    if (paneLayout) return
     val editor by vm.editor.collectAsStateWithLifecycle()
     val target = editor ?: return
     if (target is Editor.Asset) return
@@ -320,5 +315,83 @@ private fun ConfirmDialogs(vm: MainViewModel) {
 
         PendingConfirm.ClearData -> Unit
         null -> Unit
+    }
+}
+
+
+/** 侧边栏（docs/mobile-layout.md §8，对齐 iPad）：顶部应用名 + 三项主导航；「设置」固定左下角，上方只留白、无分隔线。 */
+@Composable
+private fun SnowSidebar(
+    route: String?,
+    settingsOpen: Boolean,
+    onNavigate: (String) -> Unit,
+    onSettings: () -> Unit,
+) {
+    val colors = appColors()
+    Column(
+        Modifier
+            .width(216.dp)
+            .fillMaxHeight()
+            .background(colors.canvas)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 12.dp),
+    ) {
+        Text(
+            stringResource(R.string.app_name),
+            style = SnowFoldType.statValue,
+            color = colors.ink,
+            modifier = Modifier.padding(start = 8.dp, top = 18.dp, bottom = 12.dp),
+        )
+        val sidebarLabels = mapOf(
+            ROUTE_OVERVIEW to R.string.overview_title,
+            ROUTE_ASSETS to R.string.assets_title,
+            ROUTE_SUBSCRIPTIONS to R.string.subscriptions_title,
+        )
+        NAV_ITEMS.forEach { item ->
+            SidebarRow(
+                label = stringResource(sidebarLabels.getValue(item.route)),
+                icon = item.icon,
+                selected = !settingsOpen && route == item.route,
+                onClick = { onNavigate(item.route) },
+                modifier = Modifier.testTag("nav-${item.route}"),
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        SidebarRow(
+            label = stringResource(R.string.settings_title),
+            icon = AppIcon.settings,
+            selected = settingsOpen,
+            onClick = onSettings,
+            modifier = Modifier.testTag("nav-settings").padding(bottom = 12.dp),
+        )
+    }
+}
+
+@Composable
+private fun SidebarRow(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = appColors()
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .background(if (selected) colors.accent else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp),
+    ) {
+        Icon(icon, null, tint = if (selected) colors.canvas else colors.accent, modifier = Modifier.size(20.dp))
+        Text(
+            label,
+            style = SnowFoldType.body,
+            color = if (selected) colors.canvas else colors.ink,
+            modifier = Modifier.padding(start = 10.dp),
+        )
     }
 }

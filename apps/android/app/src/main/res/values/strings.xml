@@ -217,9 +217,9 @@
     <string name="cd_next_month">下个月</string>
     <string name="cd_pick_date">选择日期</string>
     <string name="cd_back">返回</string>
-    <string name="assets_pane_hint">在左侧选择一项资产，查看变动记录与编辑</string>
-    <string name="subs_pane_hint">在左侧选择一项订阅，查看与编辑</string>
-    <string name="annual_chart_title">年化支出</string>
+    <string name="assets_pane_hint">查看余额、历史与修正记录</string>
+    <string name="subs_pane_hint">在这里查看和编辑扣费安排</string>
+    <string name="annual_chart_title">年化支出 · %1$s</string>
     <string name="annual_chart_empty">暂无扣费</string>
     <string name="corrections_toggle">修正记录</string>
     <string name="corrections_empty">没有修正记录</string>
@@ -247,4 +247,10 @@
     <string name="menu_delete">删除</string>
     <string name="local_data_title">无法读取本机数据</string>
     <string name="menu_edit">编辑</string>
+    <string name="assets_pane_title">选择一项资产</string>
+    <string name="subs_pane_title">选择一项订阅</string>
+    <string name="schedule_section">30 天扣费安排</string>
+    <string name="timeline_caption">显示未来 30 天内及逾期待确认的前 5 笔；柱高表示笔数，金额见下方明细。</string>
+    <string name="sum_line_debt_net">总负债 %1$s · 净资产 %2$s</string>
+    <string name="updated_meta">历史 %1$d 条 · 更新于 %2$s</string>
 </resources>

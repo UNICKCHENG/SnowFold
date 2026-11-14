@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyItemScope
@@ -22,7 +23,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SwipeToDismissBox
@@ -58,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import app.snowfold.MainViewModel
 import app.snowfold.R
 import app.snowfold.ui.components.AppIcon
+import app.snowfold.ui.components.AnnualBars
 import app.snowfold.ui.components.AppCard
 import app.snowfold.ui.components.PageScaffold
 import app.snowfold.ui.components.AmountText
@@ -91,6 +95,50 @@ private fun StatCurrencyLines(combined: String?) {
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
+    }
+}
+
+/** 年化条形图区（§8，对齐 iPad）：CNY、USD 各一张，在订订阅按年化降序最多 8 条。 */
+@Composable
+private fun AnnualSection(ui: UiLedger) {
+    val colors = appColors()
+    val active = ui.subscriptions.filter { it.active }
+    val charts = listOf("CNY" to colors.accent, "USD" to colors.usd).mapNotNull { (currency, barColor) ->
+        val items = active.filter { it.currency == currency }
+            .sortedByDescending { it.annualCents }.take(8)
+            .map { Triple(it.name, it.annualCents, it.annualText) }
+        if (items.isEmpty()) null else Triple(currency, barColor, items)
+    }
+    if (charts.isEmpty()) {
+        AppCard {
+            Text(
+                stringResource(R.string.no_charges), style = SnowFoldType.body, color = colors.ink3,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+                textAlign = TextAlign.Center,
+            )
+        }
+    } else {
+        charts.forEach { (currency, barColor, items) ->
+            AppCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(stringResource(R.string.annual_chart_title, currency), style = SnowFoldType.helper, color = colors.ink2)
+                    AnnualBars(items, barColor, stringResource(R.string.no_charges))
+                }
+            }
+        }
+    }
+}
+
+/** 统计格内容（E）：标签 + 说明按钮 + 数值。 */
+@Composable
+private fun StatCell(label: String, help: String, content: @Composable () -> Unit) {
+    // The help button shares the value column's height, keeping the first renewal visible.
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = SnowFoldType.helper, color = appColors().ink2)
+            content()
+        }
+        InfoTooltip(help)
     }
 }
 
@@ -129,6 +177,7 @@ fun SubscriptionsScreen(
     onDelete: (String) -> Unit,
     selectedSubscriptionId: String?,
     expanded: Boolean,
+    paneLayout: Boolean = false,
     focusGroup: Int = -1,
     modifier: Modifier = Modifier,
 ) {
@@ -137,8 +186,10 @@ fun SubscriptionsScreen(
         title = stringResource(R.string.subscriptions_title),
         modifier = modifier,
         actions = {
-            IconButton(onClick = onOpenSettings) {
-                Icon(appIcon(AppIcon.settings), contentDescription = stringResource(R.string.cd_settings), tint = tokens.ink2)
+            if (!expanded) {
+                IconButton(onClick = onOpenSettings) {
+                    Icon(appIcon(AppIcon.settings), contentDescription = stringResource(R.string.cd_settings), tint = tokens.ink2)
+                }
             }
             IconButton(onClick = onNewSubscription) {
                 Icon(appIcon(AppIcon.plus), contentDescription = stringResource(R.string.new_subscription), tint = tokens.accent)
@@ -176,50 +227,61 @@ fun SubscriptionsScreen(
             top = DesignTokens.space3,
             bottom = DesignTokens.space4 + 96.dp,
         ),
-        verticalArrangement = Arrangement.spacedBy(DesignTokens.space3),
+        verticalArrangement = Arrangement.spacedBy(DesignTokens.space2),
     ) {
         if (bannerText != null) item { app.snowfold.ui.components.ErrorBanner(text = bannerText) }
         if (overflowText != null) item { app.snowfold.ui.components.ErrorBanner(text = overflowText) }
 
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(DesignTokens.space2)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.space2)) {
-                    StatTile(stringResource(R.string.due_this_month), modifier = Modifier.weight(1f)) {
-                        StatCurrencyLines(ui.stats?.dueThisMonthText)
-                    }
-                    StatTile(stringResource(R.string.monthly_spending), modifier = Modifier.weight(1f), help = { InfoTooltip(stringResource(R.string.monthly_spending_help)) }) {
-                        StatCurrencyLines(ui.stats?.monthlyText)
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(DesignTokens.space2)) {
-                    StatTile(stringResource(R.string.annual_spending), modifier = Modifier.weight(1f), help = { InfoTooltip(stringResource(R.string.annual_spending_help)) }) {
-                        StatCurrencyLines(ui.stats?.annualText)
-                    }
-                    StatTile(stringResource(R.string.next_charge), modifier = Modifier.weight(1f)) {
-                        val next = ui.nextCharge
-                        if (next != null) {
-                            Column {
-                                Text(
-                                    dateShort(LocalDate.parse(next.nextChargeRaw)),
-                                    style = SnowFoldType.statValue.copy(fontFeatureSettings = "tnum"),
-                                    color = tokens.ink,
-                                )
-                                Text(
-                                    next.name ?: stringResource(R.string.no_charges),
-                                    style = SnowFoldType.helper,
-                                    color = tokens.ink2,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+            // E：四项统计合并进一张卡，2×2，带说明按钮。
+            AppCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            StatCell(stringResource(R.string.due_this_month), stringResource(R.string.due_this_month_help)) {
+                                StatCurrencyLines(ui.stats?.dueThisMonthText)
                             }
-                        } else {
-                            Text(stringResource(R.string.no_charges), style = SnowFoldType.statValue, color = tokens.ink2)
+                        }
+                        Box(Modifier.weight(1f)) {
+                            StatCell(stringResource(R.string.monthly_spending), stringResource(R.string.monthly_spending_help)) {
+                                StatCurrencyLines(ui.stats?.monthlyText)
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = tokens.hairline)
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            StatCell(stringResource(R.string.annual_spending), stringResource(R.string.annual_spending_help)) {
+                                StatCurrencyLines(ui.stats?.annualText)
+                            }
+                        }
+                        Box(Modifier.weight(1f)) {
+                            StatCell(stringResource(R.string.next_charge), stringResource(R.string.next_charge) + " · " + stringResource(R.string.due_this_month_help)) {
+                                val next = ui.nextCharge
+                                if (next != null) {
+                                    Column {
+                                        Text(
+                                            dateShort(LocalDate.parse(next.nextChargeRaw)),
+                                            style = SnowFoldType.statValue.copy(fontFeatureSettings = "tnum"),
+                                            color = tokens.ink,
+                                        )
+                                        Text(
+                                            next.name ?: stringResource(R.string.no_charges),
+                                            style = SnowFoldType.helper,
+                                            color = tokens.ink2,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                } else {
+                                    Text(stringResource(R.string.no_charges), style = SnowFoldType.statValue, color = tokens.ink2)
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-
 
         if (ui.subscriptions.isEmpty()) {
             item {
@@ -241,9 +303,9 @@ fun SubscriptionsScreen(
         } else {
             val grouped = (0..4).map { group -> group to ui.subscriptions.filter { it.groupOrdinal == group }.sortedBy { it.nextChargeOn } }
             grouped.forEach { (group, subs) ->
-                if (subs.isEmpty()) return@forEach
+                if (subs.isEmpty() && group != 0) return@forEach
                 item(key = "group-$group") {
-                    Row(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("subscription-group-$group")
+                    Row(modifier = Modifier.fillMaxWidth().heightIn(min = 24.dp).testTag("subscription-group-$group")
                         .padding(top = DesignTokens.space2)) {
                         Text(
                             text = when (group) {
@@ -267,6 +329,7 @@ fun SubscriptionsScreen(
                         sub = sub,
                         isOverdueGroup = group == 0,
                         selected = sub.id == selectedSubscriptionId,
+                        expanded = expanded && paneLayout,
                         onOpen = { onOpenSubscription(sub.id) },
                         onRenew = { onRenew(sub.id) },
                         onPauseToggle = { onPauseToggle(sub.id, !sub.active) },
@@ -274,6 +337,7 @@ fun SubscriptionsScreen(
                         modifier = Modifier.animateItem(),
                     )
                 }
+                if (group == 0 && expanded) item(key = "annual-chart") { AnnualSection(ui) }
             }
         }
         }
@@ -286,6 +350,7 @@ private fun LazyItemScope.SubscriptionRow(
     sub: SubscriptionUi,
     isOverdueGroup: Boolean,
     selected: Boolean,
+    expanded: Boolean = false,
     onOpen: () -> Unit,
     onRenew: () -> Unit,
     onPauseToggle: () -> Unit,
@@ -353,6 +418,8 @@ private fun LazyItemScope.SubscriptionRow(
         BoxWithConstraints {
             val stacked = maxWidth < 280.dp || LocalDensity.current.fontScale > 1.3f
             val contentAlpha by animateFloatAsState(if (sub.active) 1f else 0.62f, label = "rowAlpha")
+            // 待确认行的尾部是「已续费」按钮，金额必须另起一行显示，不能被按钮顶掉。
+            val twoLine = expanded || (isOverdueGroup && sub.active)
             val trailing: @Composable () -> Unit = {
                 if (isOverdueGroup && sub.active) FilledTonalButton(
                     onClick = { Haptics.success(view); onRenew() },
@@ -387,9 +454,16 @@ private fun LazyItemScope.SubscriptionRow(
                             style = SnowFoldType.helper, color = tokens.negative)
                         if (!sub.active) Text(stringResource(R.string.paused_badge), style = SnowFoldType.badge, color = tokens.ink2)
                     }
-                    if (!stacked) Box(Modifier.weight(0.9f)) { trailing() }
+                    if (!stacked && !twoLine) Box(Modifier.weight(0.9f)) { trailing() }
                 }
-                if (stacked) Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.CenterEnd) { trailing() }
+                if (twoLine) {
+                    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        AmountText(sub.amountText, SnowFoldType.rowValue, Modifier, tokens.ink)
+                        Spacer(Modifier.weight(1f))
+                        if (isOverdueGroup && sub.active) trailing()
+                    }
+                }
+                if (stacked && !twoLine) Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.CenterEnd) { trailing() }
             }
         }
     }

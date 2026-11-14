@@ -61,6 +61,7 @@ data class AssetUi(
     val amountText: String,
     val amountPlain: String,
     val history: List<HistoryUi>,
+    val updatedOn: java.time.LocalDate?,
 )
 
 data class CategoryUi(
@@ -221,6 +222,7 @@ fun LedgerGateway.toUiLedger(
             amountText = formatMoney(asset.amountCents, "CNY"),
             amountPlain = plainAmount(asset.amountCents),
             history = rows,
+            updatedOn = runCatching { java.time.LocalDate.parse(asset.updatedAt.substringBefore('T')) }.getOrNull(),
         )
     }
 

@@ -24,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyItemScope
@@ -65,6 +66,7 @@ import app.snowfold.ui.components.AmountText
 import app.snowfold.ui.components.ErrorBanner
 import app.snowfold.ui.components.Haptics
 import app.snowfold.ui.components.appColors
+import app.snowfold.ui.components.dateShort
 import app.snowfold.ui.components.appIcon
 import app.snowfold.ui.components.categoryTint
 import app.snowfold.ui.editors.AssetEditorContent
@@ -87,12 +89,13 @@ fun AssetsScreen(
     onRenameAsset: (String) -> Unit,
     editorTarget: Editor?,
     expanded: Boolean,
+    paneLayout: Boolean = false,
     focusCategory: Int = -1,
     modifier: Modifier = Modifier,
 ) {
     val tokens = appColors()
     val selectedAssetId = (editorTarget as? Editor.Asset)?.id
-    if (!expanded && editorTarget is Editor.Asset) {
+    if (!paneLayout && editorTarget is Editor.Asset) {
         androidx.activity.compose.BackHandler { vm.closeEditor() }
         Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
             app.snowfold.ui.editors.SheetNavBar(stringResource(R.string.assets_title), vm::closeEditor)
@@ -103,15 +106,19 @@ fun AssetsScreen(
             title = stringResource(R.string.assets_title),
             modifier = modifier,
             actions = {
-                IconButton(onClick = onOpenSettings) {
-                    Icon(AppIcon.settings, stringResource(R.string.cd_settings), tint = tokens.ink2)
+                if (!expanded) {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(AppIcon.settings, stringResource(R.string.cd_settings), tint = tokens.ink2)
+                    }
                 }
-                IconButton(onClick = { onNewAsset(0) }) {
-                    Icon(AppIcon.plus, stringResource(R.string.add), tint = tokens.accent)
+                if (!expanded) {
+                    IconButton(onClick = { onNewAsset(0) }, modifier = Modifier.testTag("assets-add")) {
+                        Icon(AppIcon.plus, stringResource(R.string.add), tint = tokens.accent)
+                    }
                 }
             },
         ) { pad ->
-            if (expanded) {
+            if (paneLayout) {
                 Row(pad.fillMaxWidth()) {
             Box(Modifier.weight(0.45f)) {
                 AssetsList(
@@ -123,10 +130,11 @@ fun AssetsScreen(
                     onRenameAsset = onRenameAsset,
                     onAdjustAsset = { vm.openEditor(Editor.Asset(it, "balance")) },
                     selectedAssetId = selectedAssetId,
+                    expanded = expanded,
                     focusCategory = focusCategory,
                 )
             }
-            Box(Modifier.weight(0.55f)) {
+            Box(Modifier.weight(1f)) {
                 val paneTarget = if (editorTarget is Editor.NewAsset || editorTarget is Editor.Asset) editorTarget else null
                 if (paneTarget != null) {
                     AppScreen {
@@ -139,17 +147,13 @@ fun AssetsScreen(
                         }
                     }
                 } else {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            text = stringResource(R.string.assets_pane_hint),
-                            style = SnowFoldType.body,
-                            color = tokens.ink3,
-                            textAlign = TextAlign.Center,
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        app.snowfold.ui.components.GraphicEmptyState(
+                            iconRes = AppIcon.assets,
+                            title = stringResource(R.string.assets_pane_title),
+                            support = stringResource(R.string.assets_pane_hint),
+                            iconContainer = tokens.tile,
+                            iconTint = tokens.ink2,
                         )
                     }
                 }
@@ -165,6 +169,7 @@ fun AssetsScreen(
                     onRenameAsset = onRenameAsset,
                     onAdjustAsset = { vm.openEditor(Editor.Asset(it, "balance")) },
                     selectedAssetId = null,
+                    expanded = expanded,
                     focusCategory = focusCategory,
                     modifier = pad,
                 )
@@ -177,6 +182,7 @@ fun AssetsScreen(
 private fun AssetsList(
     ui: UiLedger,
     bannerText: String?,
+    expanded: Boolean = false,
     focusCategory: Int = -1,
     onNewAsset: (Int) -> Unit,
     onOpenAsset: (String) -> Unit,
@@ -194,17 +200,23 @@ private fun AssetsList(
         val map = mutableMapOf<Int, Int>()
         ui.categories.forEach { category ->
             map[category.index] = cursor
-            val count = ui.assets.count { it.categoryIndex == category.index }
-            cursor += 1 + (if (count == 0) 1 else 0) + count
+            // Each category has a header and one body (grouped rows or empty state).
+            cursor += 2
         }
         map
     }
     androidx.compose.runtime.LaunchedEffect(focusCategory) {
         if (focusCategory >= 0) listState.animateScrollToItem(focusMap[focusCategory] ?: 0)
     }
+    Column(modifier = modifier) {
+    if (expanded) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        IconButton(onClick = { onNewAsset(0) }, modifier = Modifier.testTag("assets-add")) {
+            Icon(AppIcon.plus, stringResource(R.string.add), tint = tokens.accent)
+        }
+    }
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxWidth().testTag("assets-list"),
+        modifier = Modifier.weight(1f).fillMaxWidth().testTag("assets-list"),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
             start = DesignTokens.pageMargin,
             end = DesignTokens.pageMargin,
@@ -219,6 +231,13 @@ private fun AssetsList(
                 Text(stringResource(R.string.total_assets), style = SnowFoldType.helper, color = tokens.ink2)
                 AmountText(ui.hero?.assetsText ?: stringResource(R.string.out_of_range), SnowFoldType.cardNumber,
                     Modifier.fillMaxWidth(), decimalHierarchy = true)
+                Text(stringResource(R.string.assets_subtitle, ui.assets.size), style = SnowFoldType.helper, color = tokens.ink2)
+                val debt = ui.hero?.debtText
+                val net = ui.hero?.netText
+                if (debt != null && net != null) {
+                    Text(stringResource(R.string.sum_line_debt_net, debt, net),
+                        style = SnowFoldType.helper.copy(fontFeatureSettings = "tnum"), color = tokens.ink2)
+                }
             }
         }
         ui.categories.forEach { category ->
@@ -227,6 +246,7 @@ private fun AssetsList(
                 CategoryHeader(
                     category = category,
                     onAdd = { onNewAsset(category.index) },
+                    showAdd = true,
                     modifier = Modifier.padding(top = DesignTokens.space3).testTag("asset-group-${category.index}"),
                 )
             }
@@ -246,18 +266,29 @@ private fun AssetsList(
                     }
                 }
             }
-            itemsIndexed(categoryAssets, key = { _, asset -> asset.id }) { _, asset ->
-                AssetRow(
-                    asset = asset,
-                    selected = asset.id == selectedAssetId,
-                    onOpen = { onOpenAsset(asset.id) },
-                    onAdjust = { onAdjustAsset(asset.id) },
-                    onDelete = { onDeleteAsset(asset.id) },
-                    onRename = { onRenameAsset(asset.id) },
-                    modifier = Modifier.animateItem(),
-                )
+            if (categoryAssets.isNotEmpty()) {
+                item(key = "cat-rows-${category.index}") {
+                    // §8/D：连续分组列表——一个分区一张卡，行间分隔线，无逐行卡片。
+                    app.snowfold.ui.components.AppCard {
+                        Column {
+                            categoryAssets.forEachIndexed { index, asset ->
+                                if (index > 0) androidx.compose.material3.HorizontalDivider(
+                                    color = tokens.hairline, modifier = Modifier.padding(start = 16.dp))
+                                AssetRow(
+                                    asset = asset,
+                                    selected = asset.id == selectedAssetId,
+                                    onOpen = { onOpenAsset(asset.id) },
+                                    onAdjust = { onAdjustAsset(asset.id) },
+                                    onDelete = { onDeleteAsset(asset.id) },
+                                    onRename = { onRenameAsset(asset.id) },
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
     }
 }
 
@@ -266,6 +297,7 @@ private fun AssetsList(
 private fun CategoryHeader(
     category: CategoryUi,
     onAdd: () -> Unit,
+    showAdd: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val tokens = appColors()
@@ -280,13 +312,18 @@ private fun CategoryHeader(
         }
         AmountText(category.amountText, SnowFoldType.rowValue, Modifier.weight(1f),
             color = if (category.isLiability) tokens.negative else tokens.ink)
+        if (showAdd) {
+            IconButton(onClick = onAdd, modifier = Modifier.testTag("add-category-${category.index}")) {
+                Icon(AppIcon.plus, stringResource(R.string.add), tint = tokens.accent)
+            }
+        }
     }
 }
 
 /** 资产行：右滑删除（撤销条），左滑重命名，点行 / 长按进详情。 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LazyItemScope.AssetRow(
+private fun AssetRow(
     asset: AssetUi,
     selected: Boolean,
     onOpen: () -> Unit,
@@ -350,8 +387,7 @@ private fun LazyItemScope.AssetRow(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .background(
-                    if (selected) tokens.accent.copy(alpha = 0.10f) else tokens.card,
-                    RoundedCornerShape(DesignTokens.tileCorner),
+                    if (selected) tokens.accent.copy(alpha = 0.10f) else androidx.compose.ui.graphics.Color.Transparent,
                 )
                 .testTag("asset-${asset.id}")
                 .combinedClickable(onClick = onOpen, onLongClick = { menuOpen = true })
@@ -388,7 +424,8 @@ private fun LazyItemScope.AssetRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = stringResource(R.string.history_count_inline, asset.history.size),
+                    text = asset.updatedOn?.let { stringResource(R.string.updated_meta, asset.history.size, dateShort(it)) }
+                        ?: stringResource(R.string.history_count_inline, asset.history.size),
                     style = SnowFoldType.helper,
                     color = tokens.ink3,
                     modifier = Modifier.padding(top = 2.dp),
@@ -399,7 +436,8 @@ private fun LazyItemScope.AssetRow(
                 value = asset.amountText,
                 style = SnowFoldType.rowValue,
                 color = if (asset.categoryIndex == 4) tokens.negative else tokens.ink,
-                modifier = Modifier.weight(0.9f).padding(start = 12.dp),
+                // 金额按自身宽度排，把剩余宽度留给名称和「更新于」日期，避免日期被拆行。
+                modifier = Modifier.padding(start = 12.dp),
             )
         }
     }

@@ -47,7 +47,8 @@ class MainActivity : ComponentActivity() {
             val windowSizeClass = calculateWindowSizeClass(this)
             SnowFoldTheme(darkTheme = darkTheme) {
                 val expanded = windowSizeClass.widthSizeClass >= WindowWidthSizeClass.Medium
-                AppRoot(vm = vm, expanded = expanded)
+                val wideTablet = expanded
+                AppRoot(vm = vm, expanded = expanded, wideTablet = wideTablet)
             }
         }
     }
