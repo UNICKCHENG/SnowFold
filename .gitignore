@@ -1,0 +1,45 @@
+# Build and packaging outputs (all platforms).
+/target/
+/dist/
+*.zip
+*.zip.sha256
+*.dmg
+*.pkg
+*.exe
+*.msi
+*.msix
+*.ipa
+*.xcarchive
+*.dSYM
+*.dSYM.zip
+*.apk
+*.aab
+
+# Signing material must never be committed.
+*.p12
+*.mobileprovision
+*.provisionprofile
+*.jks
+*.keystore
+
+# Local tooling and OS files.
+.DS_Store
+.idea/
+*.iml
+.vscode/
+.fullstack
+
+# Apple: generated bindings/XCFramework, generated Xcode project, build outputs, per-user Xcode state.
+/apps/apple/Generated/
+/apps/apple/.build/
+/apps/apple/*.xcodeproj/
+**/xcuserdata/
+*.xcuserstate
+
+# Android: local configuration, generated bindings/native libraries, Gradle outputs.
+/apps/android/.gradle/
+/apps/android/.kotlin/
+/apps/android/local.properties
+/apps/android/**/build/
+/apps/android/**/src/main/jniLibs/
+/apps/android/captures/
