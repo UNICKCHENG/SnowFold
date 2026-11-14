@@ -19,16 +19,10 @@ fn main() {
                     window_min_size: Some(size(px(960.), px(720.))),
                     titlebar: Some(TitlebarOptions {
                         title: Some("SnowFold".into()),
-                        // macOS：红绿灯挪到左侧 18pt、距顶 21pt。
-                        // 系统按钮高 14pt，21 + 7 = 28，与自绘 logo（17..39）、
-                        // 分段导航（13.5..42.5）的中轴 28 完全对齐。
-                        traffic_light_position: Some(gpui::point(px(18.), px(21.))),
-                        // macOS：隐藏系统标题栏，消除内容上方的黑色边框；
-                        // Windows 需要自绘窗口控件才能隐藏，当前保留系统标题栏。
-                        #[cfg(target_os = "macos")]
-                        appears_transparent: true,
-                        #[cfg(not(target_os = "macos"))]
+                        // GPUI 桌面端只发布 Windows 版（Mac 由 apps/apple 的 SwiftUI 应用提供）；
+                        // Windows 隐藏标题栏需要自绘窗口控件，当前保留系统标题栏。
                         appears_transparent: false,
+                        ..Default::default()
                     }),
                     ..Default::default()
                 },

@@ -66,7 +66,7 @@ open apps/apple/SnowFold.xcodeproj
 
 构建脚本（仓库根目录运行）从零完成三切片 release 编译、用仓库内同版本 `uniffi-bindgen` 从实际核心库生成 Swift 绑定、打包 XCFramework 和生成 Xcode 工程。产物在 `apps/apple/Generated/`，临时文件与 DerivedData 放 `apps/apple/.build/`，均不入库。核心与生成器的 manifest 路径只在脚本开头的 `CORE_MANIFEST`、`BINDGEN_MANIFEST` 两处，目录迁移时改这两个变量。
 
-接口变动后重跑同一脚本，再构建两个 app；若调用签名变化，适配点集中在 `Sources/OverviewModel.swift` 的 `open` 和 `overview`。构建不会自动执行 Cargo，避免每次 SwiftUI 迭代都重复编译三套 Rust 库。
+接口变动后重跑同一脚本，再构建两个 app；若调用签名变化，适配点集中在 `Sources/Core/Store.swift`（`SnowFoldCore.open` 与各核心调用）。构建不会自动执行 Cargo，避免每次 SwiftUI 迭代都重复编译三套 Rust 库。
 
 从仓库根目录构建（无需开发者账号）：
 
@@ -124,38 +124,6 @@ cargo run --locked -p snowfold-uniffi-bindgen --bin uniffi-bindgen -- generate \
 
 示例中的 `libsnowfold_core.dylib` 是 macOS 调试库名，其他平台换成对应产物路径。UniFFI 0.32.2 的 `--library` 标记已 deprecated，但当前生成链仍依赖它；升级生成器前先验证该用法仍可用。
 
-## GPUI macOS 兼容链（待退役）
-
-GPUI 桌面同时提供 macOS 打包：`apps/desktop/packaging/macos/` 仍在维护并在 CI 中产出应用包。按既定决策，SwiftUI Mac 版完成验收后，此链路（`package.sh`、`make-icon.sh`、`Info.plist`、`AppIcon.icns` 及相关 CI 打包步骤）成套退役；退役时保留仍被 Windows 使用的 `NOTICE.txt`、共享 SVG 与 ICO。
-
-打包（宿主 macOS，仓库根目录）：
-
-```sh
-sh apps/desktop/packaging/macos/package.sh
-```
-
-脚本使用锁定依赖构建 release，复制 Info.plist、应用图标与本地资源说明，执行 ad-hoc 签名及验证，再生成 ZIP。GPUI Component 的 Lucide SVG 通过 `gpui-component-assets` 编入二进制，SQLite 也随二进制编译；应用没有资源 CDN 或运行时图标请求。
-
-产物为 `dist/SnowFold.app` 与 `dist/SnowFold-macos.zip`（默认按本机架构，ad-hoc 签名，无 Developer ID 签名或公证）。加 `--universal` 时编译 Intel 与 Apple 芯片两个架构合成通用包，并额外生成 `dist/SnowFold-macos.dmg`（发版用）：
-
-```sh
-sh apps/desktop/packaging/macos/package.sh --universal
-```
-
-启动：
-
-```sh
-open dist/SnowFold.app
-```
-
-默认数据库为 `~/Library/Application Support/SnowFold/snowfold.sqlite3`。设置中显示实际路径。可用 `SNOWFOLD_DATA_DIR` 使用独立目录，验收与正常数据应分开：
-
-```sh
-SNOWFOLD_DATA_DIR=/tmp/snowfold-dev open -n dist/SnowFold.app
-```
-
-`open -n` 会创建新实例，避免多个实例同时编辑同一个数据库。应用关闭最后一个窗口或 Cmd/Ctrl+Q 后退出。
-
 ## Windows 实机验收
 
 打包产出不等于验收。发布维护者在 CI 产包后，还需在 Windows 桌面实机完成以下检查；首次验收请在独立目录运行，避免使用正常业务库：
@@ -189,8 +157,8 @@ Remove-Item Env:SNOWFOLD_DATA_DIR
 
 推送与 PR 按改动路径决定检查范围：
 
-- 改 `core/`、`shared/`、根 `Cargo.toml`、`Cargo.lock`、`rust-toolchain*` 或 `.github/workflows/`：四端全测（桌面 macOS+Windows、苹果、安卓）。
-- 只改 `apps/desktop/`：只测桌面（macOS、Windows）。
+- 改 `core/`、`shared/`、根 `Cargo.toml`、`Cargo.lock`、`rust-toolchain*` 或 `.github/workflows/`：四端全测（桌面 Windows、苹果、安卓）。
+- 只改 `apps/desktop/`：只测桌面（Windows，同时跑全部内核测试）。
 - 只改 `apps/apple/`：只测苹果（内核 XCFramework、iOS 模拟器与 macOS 构建）。
 - 只改 `apps/android/`：只测安卓（含 Gradle Wrapper 官方版本校验）。
 - 只改 `docs/`、根 README 等说明文档：不跑构建与测试。
@@ -204,7 +172,7 @@ Remove-Item Env:SNOWFOLD_DATA_DIR
 | 资产 | 说明 |
 | --- | --- |
 | `SnowFold-windows-x64.exe`、`SnowFold-windows-arm64.exe` | 单文件便携程序，静态链接 CRT，无需 VC++ 运行库；arm64 在 x64 runner 上交叉编译，首次实机验证前按未验证产物对待 |
-| `SnowFold-macos.dmg` | Intel + Apple 芯片通用包，打开后拖入「应用程序」；ad-hoc 签名，未公证 |
+| `SnowFold-macos.dmg` | SwiftUI Mac 应用的 Intel + Apple 芯片通用包，由 `apps/apple/scripts/package-macos.sh` 生成，打开后拖入「应用程序」；未签名，未公证 |
 | `SnowFold-android.apk` | release 签名 APK |
 | `NOTICE.txt`、`SHA256SUMS` | 第三方声明；全部资产的校验和 |
 

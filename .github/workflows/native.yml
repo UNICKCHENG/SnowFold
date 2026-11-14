@@ -90,14 +90,11 @@ jobs:
           PY
 
   desktop:
-    name: Desktop (${{ matrix.os }})
+    # GPUI desktop ships only on Windows; this job also runs every core test.
+    name: Desktop (Windows)
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -108,7 +105,6 @@ jobs:
           toolchain: '1.96.0'
           components: rustfmt
       - name: Configure Windows x64 MSVC and SDK tools
-        if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with:
           arch: x64
@@ -116,9 +112,7 @@ jobs:
         with:
           workspaces: '. -> target/ci'
           shared-key: desktop-check
-      - name: Check formatting once (platform independent)
-        if: runner.os == 'macOS'
-        run: cargo fmt --check
+      - run: cargo fmt --check
       - run: cargo test --locked --workspace
 
   apple:

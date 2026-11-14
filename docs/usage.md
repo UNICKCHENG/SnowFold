@@ -10,7 +10,6 @@
 
 | 宿主 | 数据目录 |
 | --- | --- |
-| GPUI 桌面（macOS） | `~/Library/Application Support/SnowFold/`（`snowfold.sqlite3`） |
 | GPUI 桌面（Windows） | `%LOCALAPPDATA%\SnowFold\data\`（`snowfold.sqlite3`） |
 | SwiftUI（Mac） | `~/Library/Containers/app.snowfold/Data/Library/Application Support/SnowFold/` |
 | SwiftUI（iPhone/iPad） | 应用沙盒 `Application Support/SnowFold/` |
@@ -34,7 +33,7 @@ GPUI 桌面端可用环境变量 `SNOWFOLD_DATA_DIR` 指定独立目录（例如
 | 控件导航 / 激活 | Tab、Shift+Tab / Enter、Space |
 | 退出 | Cmd/Ctrl+Q |
 
-窗口初始内容尺寸 1440×900，最小 960×720；macOS 用透明标题栏，按住顶部「SnowFold」区域可拖动窗口，Windows 保留系统标题栏。
+窗口初始内容尺寸 1440×900，最小 960×720，保留系统标题栏。
 
 ## JSON 导入导出
 

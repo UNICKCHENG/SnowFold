@@ -48,11 +48,17 @@ targets:
     platform: macOS
     settings:
       base:
-        ARCHS: arm64
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.finance
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: YES
         CODE_SIGN_ENTITLEMENTS: SnowFold.entitlements
+      configs:
+        Debug:
+          ARCHS: arm64
+          ONLY_ACTIVE_ARCH: YES
+        Release:
+          ARCHS: "$(ARCHS_STANDARD)"
+          ONLY_ACTIVE_ARCH: NO
   SnowFoldTests-iOS:
     type: bundle.unit-test
     platform: iOS

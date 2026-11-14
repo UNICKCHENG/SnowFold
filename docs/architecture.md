@@ -41,10 +41,10 @@ SnowFold 是完全离线的个人资产与订阅台账。四端（iPhone、Mac�
 
 | 文件 | 去向 |
 | --- | --- |
-| `apps/desktop/packaging/NOTICE.txt` | Mac 与 Windows 安装包里的第三方组件声明 |
+| `apps/desktop/packaging/NOTICE.txt` | 第三方组件声明；发版时作为独立附件随全部安装包发布 |
 | `apps/desktop/packaging/windows/zip-readme.txt` | Windows 压缩包里的 `README.txt`（运行说明） |
 
-`apps/desktop/packaging/macos/` 是 GPUI 的 macOS 打包兼容链：SwiftUI Mac 版完成验收后成套退役，退役条件与现状见 [development.md](development.md)。
+GPUI 桌面端只发布 Windows 版；Mac 版由 `apps/apple/` 的 SwiftUI 应用提供。GPUI 在 Mac 上仍可编译运行，仅用于本地开发和跑桌面测试，不打包、不发布。
 
 不入库的本地目录：`target/`（编译产物）、`dist/`（打包产物）、`apps/apple/Generated/`、各端构建目录。
 

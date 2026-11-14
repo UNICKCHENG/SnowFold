@@ -2,21 +2,19 @@
 
 ## 应用图标
 
-`shared/icons/app/` 是**唯一**的应用图标矢量源。目前从它生成应用图标的只有 GPUI 桌面端（Windows 与 macOS 兼容链）；SwiftUI 与 Compose 端的应用图标尚未接入这条生成链，接入前不以本文档验收原生端图标。
+`shared/icons/app/` 是**唯一**的应用图标矢量源。目前从它生成应用图标的只有 GPUI 桌面端（Windows）；SwiftUI 与 Compose 端的应用图标尚未接入这条生成链，接入前不以本文档验收原生端图标。
 
 | 文件 | 用途 |
 | --- | --- |
 | `icon-1024.svg` | 1024×1024 主图标；用于 128px 以上尺寸、App Store / 官网展示 |
-| `icon-small.svg` | 小尺寸优化版；用于 16–64px（macOS 16/32/64，Windows 16/32/48/64），保证任务栏和 Finder 不糊 |
+| `icon-small.svg` | 小尺寸优化版；用于 16–64px（Windows 16/32/48/64），保证任务栏和资源管理器里不糊 |
 
 生成产物是桌面端直接引用的二进制资源，均已入库：
 
-- macOS：`apps/desktop/packaging/macos/AppIcon.icns` ← `sh apps/desktop/packaging/macos/make-icon.sh`（需要 librsvg + `iconutil`）
 - Windows：`apps/desktop/packaging/windows/AppIcon.ico` ← `sh apps/desktop/packaging/windows/make-icon.sh`（需要 librsvg + python3），
   再由 `apps/desktop/build.rs` 通过 `embed-resource` 嵌入 `SnowFold.exe`
 
-改图流程（GPUI 桌面端）：先改 `shared/icons/app/` 的 SVG，再分别运行两个 `make-icon.sh`，最后 `sh apps/desktop/packaging/macos/package.sh` 与
-Windows 的 `apps/desktop/packaging/windows/package.ps1` 重新打包。
+改图流程（GPUI 桌面端）：先改 `shared/icons/app/` 的 SVG，再运行 Windows 的 `make-icon.sh`，最后用 `apps/desktop/packaging/windows/package.ps1` 重新打包。
 
 ## 界面图标
 
