@@ -54,12 +54,29 @@ final class SnowFoldStore {
     /// 新建记录后短暂高亮。
     private(set) var highlightID: String?
 
+    private(set) var syncStatus: SyncStatus?
+    private(set) var isSyncing = false
+    private(set) var syncError: String?
+    private(set) var syncGeneration = 0
+    private let syncTransport: any SyncTransport
+    private let syncSleep: @Sendable (TimeInterval) async throws -> Void
+    private var activeScenes: Set<UUID> = []
+    private var intervalTask: Task<Void, Never>?
+    private var editSyncTask: Task<Void, Never>?
+    private var intervalAnchor = Date.distantPast
+    private var pendingLocalChanges = false
+    private var isChangingSyncConfig = false
+
     let dataDirectory: URL
     private let keyStore: SecureKeyStore
     private var undoExpiryTask: Task<Void, Never>?
     private var highlightTask: Task<Void, Never>?
 
-    init(dataDirectory: URL? = nil, keyStore: SecureKeyStore = KeychainKeyStore()) {
+    init(dataDirectory: URL? = nil, keyStore: SecureKeyStore = KeychainKeyStore(),
+         syncTransport: any SyncTransport = URLSessionSyncTransport(),
+         syncSleep: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) }) {
+        self.syncTransport = syncTransport
+        self.syncSleep = syncSleep
         self.dataDirectory = dataDirectory ?? Self.defaultDirectory()
         self.keyStore = keyStore
     }
@@ -84,6 +101,7 @@ final class SnowFoldStore {
             self.core = core
             state = .ready
             await refresh()
+            await reloadSyncStatus()
             theme = (try? await background { try core.theme() }) ?? .system
             do {
                 keyFingerprint = try await background { try core.keyFingerprint() }
@@ -167,6 +185,7 @@ final class SnowFoldStore {
         } catch {
             notice = "\(Copy.savedButReloadFailed)：\(Copy.userMessage(for: error))"
         }
+        scheduleAfterEdit()
         return value
     }
 
@@ -381,6 +400,7 @@ final class SnowFoldStore {
         guard let core else { throw CoreError.Internal }
         let code = try await background { try core.exportRecoveryCode() }
         keyFingerprint = (try? await background { try core.keyFingerprint() }) ?? keyFingerprint
+        await reloadSyncStatus()
         return code
     }
 
@@ -396,6 +416,7 @@ final class SnowFoldStore {
             try core.importRecoveryCode(contents: contents, expectedCurrentFingerprint: expectedCurrentFingerprint)
         }
         keyFingerprint = result.fingerprint
+        await reloadSyncStatus()
         notice = result.previousKeyBackedUp ? Copy.keyReplaced(result.fingerprint) : Copy.keyImported(result.fingerprint)
     }
 
@@ -413,6 +434,147 @@ final class SnowFoldStore {
     private func reloadKeyFingerprint() async {
         guard let core else { return }
         keyFingerprint = try? await background { try core.keyFingerprint() }
+    }
+
+    // MARK: 前台同步
+
+    enum SyncTrigger { case manual, onLaunch, interval, afterEdit, pending }
+
+    var showsSyncButton: Bool { syncStatus?.enabled == true }
+
+    /// 多窗口共同计数，只有整个应用退到后台时停止调度。
+    func setSceneActive(_ id: UUID, active: Bool) async {
+        // 场景可先于数据库打开而激活，交给 open 完成后的调用再登记。
+        guard !active || (core != nil && state == .ready) else { return }
+        let wasActive = !activeScenes.isEmpty
+        if active { activeScenes.insert(id) } else { activeScenes.remove(id) }
+        let isActive = !activeScenes.isEmpty
+        guard isActive != wasActive else { return }
+        if !isActive {
+            intervalTask?.cancel(); intervalTask = nil
+            editSyncTask?.cancel(); editSyncTask = nil
+            return
+        }
+        await refreshIfReady()
+        await reloadSyncStatus()
+        if syncStatus?.policy.onLaunch == true { await syncNow(trigger: .onLaunch) }
+        if pendingLocalChanges { scheduleAfterEdit(pending: true) }
+        scheduleInterval()
+    }
+
+    func reloadSyncStatus() async {
+        guard let core else { return }
+        do {
+            syncStatus = try await background { try core.syncStatus() }
+            if syncStatus?.enabled != true {
+                intervalTask?.cancel(); intervalTask = nil
+                editSyncTask?.cancel(); editSyncTask = nil
+            }
+        } catch {
+            syncError = Copy.syncMessage(for: error)
+        }
+    }
+
+    func configureSync(_ config: SyncConfig, secret: String) async throws {
+        try await changeSyncConfiguration { try $0.configureSync(config: config, secret: secret) }
+        syncError = nil
+        pendingLocalChanges = false
+        notice = Copy.syncConfigSaved
+    }
+
+    func setSyncEnabled(_ enabled: Bool) async throws {
+        try await changeSyncConfiguration { try $0.setSyncEnabled(enabled: enabled) }
+        intervalAnchor = .distantPast
+        notice = enabled ? Copy.syncEnabled : Copy.syncDisabled
+        scheduleInterval()
+    }
+
+    func setSyncPolicy(_ policy: SyncPolicy) async throws {
+        try await changeSyncConfiguration { try $0.setSyncPolicy(policy: policy) }
+        if !policy.afterEdit { editSyncTask?.cancel(); editSyncTask = nil }
+        if pendingLocalChanges { scheduleAfterEdit(pending: true) }
+        scheduleInterval()
+    }
+
+    func clearSyncConfig() async throws {
+        try await changeSyncConfiguration { try $0.clearSyncConfig() }
+        syncError = nil
+        pendingLocalChanges = false
+        notice = Copy.syncConfigCleared
+    }
+
+    private func changeSyncConfiguration(_ work: @escaping @Sendable (SnowFoldCore) throws -> Void) async throws {
+        guard let core else { throw CoreError.Internal }
+        guard !isSyncing, !isChangingSyncConfig else { throw CoreError.Conflict }
+        isChangingSyncConfig = true
+        defer { isChangingSyncConfig = false }
+        try await background { try work(core) }
+        await reloadSyncStatus()
+    }
+
+    /// 与普通写操作分开单飞：等待网络时仍允许编辑本机记录。
+    func syncNow(trigger: SyncTrigger = .manual) async {
+        guard let core, syncStatus?.enabled == true, syncStatus?.config != nil,
+              !isSyncing, !isChangingSyncConfig else { return }
+        if trigger != .manual, activeScenes.isEmpty { return }
+        isSyncing = true
+        intervalTask?.cancel(); intervalTask = nil
+        editSyncTask?.cancel(); editSyncTask = nil
+        let transport = syncTransport
+        defer {
+            isSyncing = false
+            scheduleInterval()
+        }
+        do {
+            let report = try await background { try core.syncNow(transport: transport) }
+            invalidateUndo()
+            await refresh()
+            syncGeneration += 1
+            syncError = nil
+            pendingLocalChanges = report.pendingLocalChanges
+            await reloadSyncStatus()
+            if trigger == .manual {
+                notice = Copy.syncCompleted(report) + (report.pendingLocalChanges ? " · " + Copy.syncPendingChanges : "")
+            }
+            if report.pendingLocalChanges { scheduleAfterEdit(pending: true) }
+        } catch {
+            await reloadSyncStatus()
+            if error as? CoreError != .Conflict {
+                syncError = Copy.syncMessage(for: error)
+                if trigger == .manual { notice = syncError }
+            }
+        }
+        // 失败也等一个周期再重试，避免已到期的时间戳造成紧密重试。
+        intervalAnchor = Date()
+    }
+
+    private func scheduleInterval() {
+        intervalTask?.cancel(); intervalTask = nil
+        guard !activeScenes.isEmpty, let status = syncStatus, status.enabled,
+              status.policy.intervalMinutes > 0, !isSyncing else { return }
+        let last = status.lastSyncedAt.flatMap(Fmt.parseRFC3339) ?? Date()
+        let anchor = max(last, intervalAnchor)
+        let delay = max(0.05, anchor.addingTimeInterval(Double(status.policy.intervalMinutes) * 60).timeIntervalSinceNow)
+        let sleep = syncSleep
+        intervalTask = Task { [weak self] in
+            do { try await sleep(delay) } catch { return }
+            guard !Task.isCancelled, let self else { return }
+            self.intervalTask = nil
+            await self.syncNow(trigger: .interval)
+        }
+    }
+
+    private func scheduleAfterEdit(pending: Bool = false) {
+        guard !activeScenes.isEmpty, syncStatus?.enabled == true,
+              pending || syncStatus?.policy.afterEdit == true else { return }
+        editSyncTask?.cancel()
+        let sleep = syncSleep
+        editSyncTask = Task { [weak self] in
+            do { try await sleep(30) } catch { return }
+            guard !Task.isCancelled, let self else { return }
+            self.editSyncTask = nil
+            await self.syncNow(trigger: pending ? .pending : .afterEdit)
+        }
     }
 
     // MARK: 高亮

@@ -74,19 +74,45 @@ enum UndoAction {
 }
 
 pub struct Storage {
-    connection: Connection,
+    pub(crate) connection: Connection,
     pub path: PathBuf,
     undo: Option<PendingUndo>,
 }
-const DATABASE_VERSION: i64 = 2;
+const DATABASE_VERSION: i64 = 3;
 struct Migration {
     version: i64,
     sql: &'static str,
 }
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 2,
-    sql: include_str!("schema.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 2,
+        sql: include_str!("schema.sql"),
+    },
+    Migration {
+        version: 3,
+        sql: include_str!("sync/schema.sql"),
+    },
+];
+
+/// 业务时间单调大于已观察的所有本机/远端记录，墙钟回拨不覆盖自己的新写入。
+fn next_time(db: &Connection) -> Result<String> {
+    let high: Option<String> = db.query_row("SELECT max(at) FROM (SELECT updated_at AS at FROM asset_items UNION ALL SELECT updated_at FROM subscriptions UNION ALL SELECT deleted_at FROM tombstones UNION ALL SELECT recorded_at FROM asset_history UNION ALL SELECT voided_at FROM asset_history UNION ALL SELECT recorded_at FROM history_corrections)", [], |r| r.get(0))?;
+    let wall = now();
+    match high {
+        Some(high) if high >= wall => {
+            let parsed = chrono::DateTime::parse_from_rfc3339(&high)?;
+            let next = parsed
+                .checked_add_signed(chrono::Duration::nanoseconds(1))
+                .context("业务时间溢出")?;
+            let value = next
+                .with_timezone(&chrono::Utc)
+                .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+            model::validate_time(&value)?;
+            Ok(value)
+        }
+        _ => Ok(wall),
+    }
+}
 
 fn apply_migrations(connection: &mut Connection, migrations: &[Migration]) -> Result<()> {
     for migration in migrations {
@@ -207,7 +233,7 @@ impl Storage {
         validate_asset(category, name, cents)?;
         let id = Id::new()?;
         let history = Id::new()?;
-        let at = now();
+        let at = next_time(&self.connection)?;
         let asset = BackupAsset {
             id,
             revision_uid: Id::new()?,
@@ -241,7 +267,7 @@ impl Storage {
         }
         let changed = self.connection.execute(
             "UPDATE asset_items SET name=?1,revision_uid=?2,updated_at=?3 WHERE uid=?4",
-            params![name.trim(), Id::new()?, now(), id],
+            params![name.trim(), Id::new()?, next_time(&self.connection)?, id],
         )?;
         require_row(changed)
     }
@@ -273,7 +299,7 @@ impl Storage {
         }
         let history = Id::new()?;
         let revision = Id::new()?;
-        let at = now();
+        let at = next_time(&tx)?;
         let previous_row: i64 = tx.query_row(
             "SELECT id FROM asset_history WHERE uid=?1 AND asset_id=?2 AND voided_at IS NULL",
             params![current, row],
@@ -304,7 +330,7 @@ impl Storage {
         if previous == cents {
             return Ok(());
         }
-        let at = now();
+        let at = next_time(&tx)?;
         tx.execute("INSERT INTO history_corrections(uid,history_id,previous_amount_cents,amount_cents,recorded_at) VALUES(?1,?2,?3,?4,?5)", params![Id::new()?,row,previous,cents,at])?;
         tx.execute(
             "UPDATE asset_history SET amount_cents=?1 WHERE id=?2",
@@ -339,7 +365,7 @@ impl Storage {
         let tombstone = Tombstone {
             entity_type: "asset".into(),
             id,
-            deleted_at: now(),
+            deleted_at: next_time(&tx)?,
         };
         insert_tombstone(&tx, &tombstone)?;
         require_row(tx.execute("DELETE FROM asset_items WHERE uid=?1", [id])?)?;
@@ -357,7 +383,7 @@ impl Storage {
     pub fn create_subscription(&mut self, input: &SubscriptionInput) -> Result<Id> {
         input.validate()?;
         let id = Id::new()?;
-        let at = now();
+        let at = next_time(&self.connection)?;
         let subscription = BackupSubscription {
             id,
             revision_uid: Id::new()?,
@@ -377,7 +403,7 @@ impl Storage {
     }
     pub fn update_subscription(&mut self, id: Id, input: &SubscriptionInput) -> Result<()> {
         input.validate()?;
-        require_row(self.connection.execute("UPDATE subscriptions SET name=?1,amount_cents=?2,currency=?3,cycle=?4,next_charge_on=?5,status=?6,revision_uid=?7,updated_at=?8 WHERE uid=?9", params![input.name.trim(),input.amount_cents,input.currency,input.cycle,input.next_charge_on.to_string(),input.status,Id::new()?,now(),id])?)
+        require_row(self.connection.execute("UPDATE subscriptions SET name=?1,amount_cents=?2,currency=?3,cycle=?4,next_charge_on=?5,status=?6,revision_uid=?7,updated_at=?8 WHERE uid=?9", params![input.name.trim(),input.amount_cents,input.currency,input.cycle,input.next_charge_on.to_string(),input.status,Id::new()?,next_time(&self.connection)?,id])?)
     }
     pub fn delete_subscription(&mut self, id: Id) -> Result<Undo> {
         let token = crypto::random_hex(16)?;
@@ -390,7 +416,7 @@ impl Storage {
         let tombstone = Tombstone {
             entity_type: "subscription".into(),
             id,
-            deleted_at: now(),
+            deleted_at: next_time(&tx)?,
         };
         insert_tombstone(&tx, &tombstone)?;
         require_row(tx.execute("DELETE FROM subscriptions WHERE uid=?1", [id])?)?;
@@ -416,6 +442,7 @@ impl Storage {
             bail!(UndoConflict);
         }
         let tx = self.connection.transaction()?;
+        let at = next_time(&tx)?;
         match &pending.action {
             UndoAction::BalanceChanged {
                 asset,
@@ -427,7 +454,6 @@ impl Storage {
                     bail!(UndoConflict);
                 }
                 let (previous_uid, previous_amount): (Id,i64) = tx.query_row("SELECT p.uid,p.amount_cents FROM asset_history h JOIN asset_history p ON p.id=h.previous_id AND p.asset_id=h.asset_id WHERE h.uid=?1 AND h.voided_at IS NULL AND p.voided_at IS NULL", [history], |r| Ok((r.get(0)?,r.get(1)?)))?;
-                let at = now();
                 tx.execute(
                     "UPDATE asset_history SET voided_at=?1 WHERE uid=?2",
                     params![at, history],
@@ -443,7 +469,7 @@ impl Storage {
                 remove_tombstone(&tx, tombstone)?;
                 let mut asset = asset.clone();
                 asset.revision_uid = Id::new()?;
-                asset.updated_at = now();
+                asset.updated_at = at.clone();
                 insert_asset(&tx, &asset)?;
                 insert_history_chain(&tx, history)?;
                 for correction in corrections {
@@ -457,7 +483,7 @@ impl Storage {
                 remove_tombstone(&tx, tombstone)?;
                 let mut subscription = subscription.clone();
                 subscription.revision_uid = Id::new()?;
-                subscription.updated_at = now();
+                subscription.updated_at = at.clone();
                 insert_subscription(&tx, &subscription)?;
             }
         }
@@ -468,33 +494,33 @@ impl Storage {
     pub fn replace_data(&mut self, backup: &Backup) -> Result<()> {
         backup.validate()?;
         let tx = self.connection.transaction()?;
-        tx.execute_batch(
-            "DELETE FROM asset_items; DELETE FROM subscriptions; DELETE FROM tombstones;",
-        )?;
-        for asset in &backup.assets {
-            insert_asset(&tx, asset)?;
-        }
-        insert_history_chain(&tx, &backup.all_history().cloned().collect::<Vec<_>>())?;
-        for correction in &backup.corrections {
-            insert_correction(&tx, correction)?;
-        }
-        for subscription in &backup.subscriptions {
-            insert_subscription(&tx, subscription)?;
-        }
-        for tombstone in &backup.tombstones {
-            insert_tombstone(&tx, tombstone)?;
-        }
-        tx.execute(
-            "UPDATE app_meta SET value=?1 WHERE key='ledger_id'",
-            [backup.ledger_id],
-        )?;
+        write_backup(&tx, backup)?;
+        tx.commit()?;
+        self.undo = None;
+        Ok(())
+    }
+    /// IMMEDIATE 在读最新账本前取得写保留锁，覆盖同进程和其他进程的 SQLite 连接。
+    pub(crate) fn finish_sync(
+        &mut self,
+        at: &str,
+        merge: impl FnOnce(&Backup) -> Result<Backup>,
+    ) -> Result<()> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let latest = read_backup(&tx, || Ok(()))?;
+        latest.validate()?;
+        let merged = merge(&latest)?;
+        merged.validate()?;
+        write_backup(&tx, &merged)?;
+        tx.execute("UPDATE sync_state SET last_synced_at=?1 WHERE id=1", [at])?;
         tx.commit()?;
         self.undo = None;
         Ok(())
     }
     pub fn clear_data(&mut self) -> Result<()> {
         let tx = self.connection.transaction()?;
-        let at = now();
+        let at = next_time(&tx)?;
         tx.execute("INSERT INTO tombstones(entity_type,uid,deleted_at) SELECT 'asset',uid,?1 FROM asset_items", [&at])?;
         tx.execute("INSERT INTO tombstones(entity_type,uid,deleted_at) SELECT 'subscription',uid,?1 FROM subscriptions", [&at])?;
         tx.execute_batch("DELETE FROM asset_items; DELETE FROM subscriptions;")?;
@@ -582,6 +608,30 @@ fn validate_asset(category: &str, name: &str, cents: i64) -> Result<()> {
     }
     Ok(())
 }
+fn write_backup(tx: &Transaction<'_>, backup: &Backup) -> Result<()> {
+    tx.execute_batch(
+        "DELETE FROM asset_items; DELETE FROM subscriptions; DELETE FROM tombstones;",
+    )?;
+    for asset in &backup.assets {
+        insert_asset(tx, asset)?;
+    }
+    insert_history_chain(tx, &backup.all_history().cloned().collect::<Vec<_>>())?;
+    for correction in &backup.corrections {
+        insert_correction(tx, correction)?;
+    }
+    for subscription in &backup.subscriptions {
+        insert_subscription(tx, subscription)?;
+    }
+    for tombstone in &backup.tombstones {
+        insert_tombstone(tx, tombstone)?;
+    }
+    tx.execute(
+        "UPDATE app_meta SET value=?1 WHERE key='ledger_id'",
+        [backup.ledger_id],
+    )?;
+    Ok(())
+}
+
 fn read_backup(db: &Connection, after_assets: impl FnOnce() -> Result<()>) -> Result<Backup> {
     let mut backup = Backup::empty(meta(db, "ledger_id")?.parse()?);
     backup.assets = db.prepare("SELECT uid,revision_uid,current_history_uid,category_code,name,amount_cents,created_at,updated_at FROM asset_items ORDER BY id")?.query_map([], |r| Ok(BackupAsset { id: r.get(0)?, revision_uid: r.get(1)?, current_history_id: r.get(2)?, category_code: r.get(3)?, name: r.get(4)?, amount_cents: r.get(5)?, created_at: r.get(6)?, updated_at: r.get(7)? }))?.collect::<rusqlite::Result<_>>()?;
@@ -1533,7 +1583,7 @@ mod schema_contract_tests {
     }
     #[test]
     fn old_and_future_databases_are_rejected_without_changes() -> Result<()> {
-        for version in [0, 1, 3] {
+        for version in [0, 1, 4] {
             let directory = tempfile::tempdir()?;
             let path = directory.path().join("old.sqlite3");
             let db = Connection::open(&path)?;
@@ -1733,6 +1783,56 @@ mod schema_contract_tests {
         let ticket = s.change_balance(id, 300)?.unwrap();
         s.undo(&ticket)?;
         assert_eq!(s.data()?.assets[0].amount_cents, 200);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod sync_finish_transaction_tests {
+    use super::*;
+
+    #[test]
+    fn sync_finish_preserves_another_connection_write() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("snowfold.sqlite3");
+        let mut storage = Storage::open(&path)?;
+        storage.create_asset("cash", "原始", 1)?;
+        let pushed = storage.backup_snapshot()?;
+        let mut second = Storage::open(&path)?;
+        second.create_asset("cash", "另一连接在收尾窗口提交", 2)?;
+        storage.finish_sync(&now(), |latest| {
+            Ok(crate::sync::merge::merge(&pushed, latest)?)
+        })?;
+        assert_eq!(
+            storage.data()?.assets.len(),
+            2,
+            "收尾不得覆盖另一连接的已提交写入"
+        );
+        Ok(())
+    }
+    #[test]
+    fn sync_finish_holds_sqlite_write_reservation_through_merge_and_releases_on_error() -> Result<()>
+    {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("snowfold.sqlite3");
+        let mut storage = Storage::open(&path)?;
+        storage.create_asset("cash", "原始", 1)?;
+        let second = Connection::open(&path)?;
+        second.busy_timeout(Duration::ZERO)?;
+        storage.finish_sync(&now(), |latest| {
+            let error=second.execute("UPDATE app_meta SET value='dark' WHERE key='theme'", []).unwrap_err();
+            assert!(matches!(error,rusqlite::Error::SqliteFailure(code,_) if code.code==rusqlite::ErrorCode::DatabaseBusy));
+            Ok(latest.clone())
+        })?;
+        assert_eq!(
+            second.execute("UPDATE app_meta SET value='dark' WHERE key='theme'", [])?,
+            1
+        );
+        assert!(storage.finish_sync(&now(), |_| bail!("拒绝合并")).is_err());
+        assert_eq!(
+            second.execute("UPDATE app_meta SET value='light' WHERE key='theme'", [])?,
+            1
+        );
         Ok(())
     }
 }

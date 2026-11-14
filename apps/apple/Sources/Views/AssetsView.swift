@@ -45,6 +45,10 @@ struct AssetsView: View {
             get: { newAssetCategory.map(CategoryPick.init) },
             set: { newAssetCategory = $0?.code }
         )) { pick in AssetEditorSheet(mode: .new(categoryCode: pick.code)) }
+        .onChange(of: store.syncGeneration) { _, _ in
+            if let target = renameTarget, !store.ledger.assets.contains(where: { $0.id == target.id }) { renameTarget = nil }
+            if let target = balanceTarget, !store.ledger.assets.contains(where: { $0.id == target.id }) { balanceTarget = nil }
+        }
         .sheet(item: $renameTarget) { AssetEditorSheet(mode: .rename($0)) }
         .sheet(item: $balanceTarget) { AssetEditorSheet(mode: .balance($0)) }
     }
@@ -211,6 +215,12 @@ struct AssetDetailView: View {
         .sheet(item: $balanceTarget) { target in
             AssetEditorSheet(mode: .balance(target))
         }
+        .onChange(of: store.syncGeneration) { _, _ in
+            if asset == nil { renameTarget = nil; balanceTarget = nil }
+            if let target = correctionTarget, !store.ledger.history.contains(where: { $0.id == target.id }) {
+                correctionTarget = nil
+            }
+        }
         .sheet(item: $correctionTarget) { record in
             HistoryCorrectionSheet(history: record, assetName: asset?.name ?? "")
         }
@@ -273,11 +283,11 @@ struct AssetDetailView: View {
                     .font(.footnote)
                     .foregroundStyle(Color.ink3)
             }
-            ForEach(Array(history.enumerated().reversed()), id: \.element.id) { position, record in
+            ForEach(history.reversed(), id: \.id) { record in
                 HistoryRowView(
                     record: record,
-                    previous: position > 0 ? history[position - 1] : nil,
-                    isCurrent: position + 1 == history.count,
+                    previous: history.first { $0.id == record.previousId },
+                    isCurrent: record.id == asset.currentHistoryId,
                     onCorrect: { correctionTarget = record }
                 )
             }
@@ -333,7 +343,7 @@ struct HistoryRowView: View {
         }
         .padding(.vertical, 5)
         .accessibilityElement(children: .contain)
-        .task(id: record) {
+        .task(id: "\(record.id)-\(record.amountCents)-\(store.syncGeneration)") {
             do { corrections = try await store.historyCorrections(historyID: record.id) }
             catch { store.showNotice(Copy.message(for: error)) }
         }

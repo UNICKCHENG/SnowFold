@@ -10,6 +10,204 @@ use snowfold_core::{
 };
 
 use core::prelude::v1::test;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
+struct SyncTestTransport {
+    calls: AtomicUsize,
+    fail: bool,
+}
+impl snowfold_core::SyncTransport for SyncTestTransport {
+    fn send(
+        &self,
+        request: snowfold_core::SyncRequest,
+    ) -> Result<snowfold_core::SyncResponse, snowfold_core::CoreError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.fail {
+            return Err(snowfold_core::CoreError::SyncNetwork);
+        }
+        Ok(snowfold_core::SyncResponse {
+            status: if request.method == "GET" { 404 } else { 201 },
+            headers: vec![],
+            body: vec![],
+        })
+    }
+}
+fn enable_test_sync(
+    view: &Entity<SnowFold>,
+    cx: &mut VisualTestContext,
+    fail: bool,
+) -> Arc<SyncTestTransport> {
+    let transport = Arc::new(SyncTestTransport {
+        calls: AtomicUsize::new(0),
+        fail,
+    });
+    view.update_in(cx, |view, _, cx| {
+        let core = view.sync.core.as_ref().unwrap();
+        core.export_recovery_code().unwrap();
+        core.configure_sync(
+            snowfold_core::SyncConfig {
+                backend: snowfold_core::SyncBackend::S3,
+                endpoint: "http://127.0.0.1:1".into(),
+                bucket: "snowfold-tests".into(),
+                region: "us-east-1".into(),
+                prefix: String::new(),
+                username: "test-access".into(),
+                path_style: true,
+            },
+            "test-secret".into(),
+        )
+        .unwrap();
+        core.set_sync_policy(snowfold_core::SyncPolicy {
+            on_launch: false,
+            interval_minutes: 0,
+            after_edit: false,
+        })
+        .unwrap();
+        core.set_sync_enabled(true).unwrap();
+        view.refresh_sync();
+        view.sync.transport = transport.clone();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    transport
+}
+
+#[gpui::test]
+fn sync_button_ignores_repeated_clicks_while_busy(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        bind_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let storage = Storage::open(&directory.path().join("snowfold.sqlite3")).unwrap();
+    let mut entity = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
+        entity = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    let view = entity.unwrap();
+    assert!(
+        cx.debug_bounds("sync-button").is_none(),
+        "未开启时不显示同步按钮"
+    );
+    let transport = enable_test_sync(&view, cx, false);
+    view.update_in(cx, |view, _, cx| {
+        view.sync.busy = true;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    click(cx, "sync-button");
+    click(cx, "sync-button");
+    assert_eq!(
+        transport.calls.load(Ordering::SeqCst),
+        0,
+        "同步中再点不会发起另一轮传输"
+    );
+    view.read_with(cx, |view, _| assert!(view.sync.busy));
+}
+
+#[gpui::test]
+fn sync_allows_local_edit_while_busy(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        bind_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let storage = Storage::open(&directory.path().join("snowfold.sqlite3")).unwrap();
+    let mut entity = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
+        entity = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    let view = entity.unwrap();
+    enable_test_sync(&view, cx, false);
+    view.update_in(cx, |view, _, cx| {
+        view.sync.busy = true;
+        cx.notify();
+    });
+    cx.simulate_keystrokes("cmd-2 cmd-n");
+    cx.simulate_input("同步中本机编辑");
+    cx.simulate_keystrokes("tab");
+    cx.simulate_input("123");
+    cx.simulate_keystrokes("enter");
+    view.read_with(cx, |view, _| {
+        assert!(view.sync.busy);
+        assert!(view.error.is_none(), "{:?}", view.error);
+        assert_eq!(view.data.assets.len(), 1);
+        assert_eq!(view.data.assets[0].amount_cents, 12300);
+    });
+}
+
+#[gpui::test]
+fn sync_success_clears_undo_and_history_panel(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        bind_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let mut storage = Storage::open(&directory.path().join("snowfold.sqlite3")).unwrap();
+    let id = storage.create_asset("cash", "同步资产", 10000).unwrap();
+    let undo = storage.change_balance(id, 20000).unwrap().unwrap();
+    let mut entity = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
+        entity = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    let view = entity.unwrap();
+    enable_test_sync(&view, cx, false);
+    view.update_in(cx, |view, _, cx| {
+        view.offer_undo(undo, "已记录本次变动", cx);
+        view.history = Some(id);
+        cx.notify();
+    });
+    click(cx, "sync-button");
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| {
+        assert!(!view.sync.busy);
+        assert!(view.sync.failure.is_none());
+        assert!(view.sync.status.as_ref().unwrap().last_synced_at.is_some());
+        assert!(view.undo.is_none());
+        assert!(view.history.is_none());
+        assert_eq!(view.data.assets[0].amount_cents, 20000);
+    });
+    // GPUI 0.2.2 的 Frame::clear 不清 debug_bounds，旧选择器不能用于断言控件消失。
+    // 撤销显示条件与票据由上面的 undo.is_none() 断言验证。
+}
+
+#[gpui::test]
+fn sync_failure_shows_retry_red_dot(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        bind_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let storage = Storage::open(&directory.path().join("snowfold.sqlite3")).unwrap();
+    let mut entity = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
+        entity = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    let view = entity.unwrap();
+    enable_test_sync(&view, cx, true);
+    click(cx, "sync-button");
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| {
+        assert!(!view.sync.busy);
+        assert_eq!(
+            view.sync.failure.as_deref(),
+            Some("无法连接同步服务，请检查网络与服务地址后重试")
+        );
+    });
+    assert!(cx.debug_bounds("sync-button-failed").is_some());
+    assert!(cx.debug_bounds("sync-failure-dot").is_some());
+}
 fn click(cx: &mut VisualTestContext, label: &'static str) {
     let bounds = cx
         .debug_bounds(label)

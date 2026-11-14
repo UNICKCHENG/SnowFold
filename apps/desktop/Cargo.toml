@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-snowfold-core = { path = "../../core" }
+snowfold-core = { path = "../../core", features = ["sync-http"] }
 anyhow.workspace = true
 chrono.workspace = true
 serde_json.workspace = true

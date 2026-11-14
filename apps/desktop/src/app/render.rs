@@ -437,12 +437,13 @@ impl Render for SnowFold {
                                             ),
                                         ],
                                     ))
+                                    .child(self.sync_settings(q, cx))
                                     .child(q.sheet_group(
                                         false,
                                         "关于",
                                         vec![q.sheet_line(
                                             "SnowFold · MVP 0.1",
-                                            "离线运行 · 无网络请求",
+                                            "默认离线运行 · 仅在开启同步后联网",
                                         )],
                                     )),
                             )
@@ -644,6 +645,11 @@ impl Render for SnowFold {
                 ..p
             };
             let (title, description, confirm_label) = match confirm {
+                Confirm::ClearSync => (
+                    "清除同步配置？",
+                    "将删除本机保存的存储地址与凭证，并停止同步。远端数据、本机数据和同步密钥都不受影响。".into(),
+                    "清除配置",
+                ),
                 Confirm::Clear => (
                     "清空全部数据？",
                     "将删除全部资产、历史与订阅，不能撤销。请先导出备份。".into(),

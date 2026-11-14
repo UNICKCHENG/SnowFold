@@ -5,6 +5,7 @@ pub mod ffi;
 pub mod keystore;
 pub mod model;
 pub mod storage;
+pub mod sync;
 
 pub use ffi::*;
 uniffi::setup_scaffolding!();

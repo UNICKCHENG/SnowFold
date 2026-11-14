@@ -206,6 +206,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     // The AAR includes Android libjnidispatch.so; a desktop JNA JAR cannot load on Android.
     implementation("net.java.dev.jna:jna:5.18.1@aar")
+    // WebDAV MKCOL 不在 Android HttpsURLConnection 支持的方法中；仅同步传输使用。
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

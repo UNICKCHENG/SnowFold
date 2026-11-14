@@ -172,45 +172,76 @@ impl Backup {
             }
             if let Some(id) = h.previous_id {
                 let previous = history.get(&id).context("前驱快照不存在")?;
-                if previous.asset_id != h.asset_id || previous.voided_at.is_some() {
+                if previous.asset_id != h.asset_id {
                     bail!("前驱快照不合法");
                 }
             }
         }
-        // A single effective chain per asset. Voided branches remain available in backups.
-        for a in &self.assets {
+        // 并发分支共享同一首条快照，不接受同一资产额外断开的根。
+        let mut roots = HashMap::<Id, usize>::new();
+        for h in self.all_history().filter(|h| h.previous_id.is_none()) {
+            *roots.entry(h.asset_id).or_default() += 1;
+        }
+        if assets.keys().any(|id| roots.get(id) != Some(&1)) {
+            bail!("资产必须只有一条初始快照");
+        }
+        // 并发余额快照允许同一资产存在分支；每条前驱仍必须存在、同属资产且无环。
+        for start in self.all_history() {
             let mut visited = HashSet::new();
-            let mut next = Some(a.current_history_id);
+            let mut next = Some(start.id);
             while let Some(id) = next {
                 if !visited.insert(id) {
                     bail!("快照链成环");
                 }
                 next = history[&id].previous_id;
             }
-            if self
-                .all_history()
-                .filter(|h| h.asset_id == a.id && h.voided_at.is_none())
-                .any(|h| !visited.contains(&h.id))
-            {
-                bail!("有效快照不在当前链上");
-            }
         }
-        let mut effective: HashMap<_, _> = self
-            .all_history()
-            .map(|h| (h.id, h.original_amount_cents))
-            .collect();
+        // 修正事实可在两设备上分叉，原值必须能从原始金额或另一条修正到达。
+        let mut corrections = HashMap::<Id, Vec<&BackupCorrection>>::new();
         for c in &self.corrections {
             unique(c.id)?;
             model::validate_time(&c.recorded_at)?;
-            let amount = effective.get_mut(&c.history_id).context("修正引用不存在")?;
-            if c.amount_cents < 0 || c.previous_amount_cents != *amount || c.amount_cents == *amount
+            if !history.contains_key(&c.history_id)
+                || c.amount_cents < 0
+                || c.previous_amount_cents < 0
+                || c.amount_cents == c.previous_amount_cents
             {
-                bail!("修正链金额不一致");
+                bail!("修正引用或金额不合法");
             }
-            *amount = c.amount_cents;
+            corrections.entry(c.history_id).or_default().push(c);
         }
         for h in self.all_history() {
-            if effective[&h.id] != h.amount_cents {
+            let list = corrections.remove(&h.id).unwrap_or_default();
+            let mut reachable = HashSet::from([h.original_amount_cents]);
+            let mut pending = list.clone();
+            while !pending.is_empty() {
+                let before = pending.len();
+                pending.retain(|c| {
+                    if reachable.contains(&c.previous_amount_cents) {
+                        reachable.insert(c.amount_cents);
+                        false
+                    } else {
+                        true
+                    }
+                });
+                if pending.len() == before {
+                    bail!("修正链金额不一致");
+                }
+            }
+            let ranked = list
+                .iter()
+                .max_by_key(|c| (&c.recorded_at, c.id))
+                .map_or(h.original_amount_cents, |c| c.amount_cents);
+            // 保留旧备份按插入顺序修正的兼容性；同步新载荷使用确定性的时间/UUID 投影。
+            let mut serial = h.original_amount_cents;
+            let mut serial_valid = true;
+            for c in list {
+                if c.previous_amount_cents != serial {
+                    serial_valid = false;
+                }
+                serial = c.amount_cents;
+            }
+            if h.amount_cents != ranked && !(serial_valid && h.amount_cents == serial) {
                 bail!("快照与修正链不一致");
             }
         }

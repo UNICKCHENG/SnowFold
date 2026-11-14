@@ -41,7 +41,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-private class FakeGateway : LedgerGateway {
+internal class FakeGateway : LedgerGateway {
     var assets = mutableListOf<MutableAsset>()
     var subscriptions = mutableListOf<MutableSubscription>()
     var createdCount = 0
@@ -278,6 +278,18 @@ private class FakeGateway : LedgerGateway {
 
     override fun importRecoveryCode(contents: String, expectedCurrentFingerprint: String?): KeyImportResult =
         KeyImportResult(fingerprint = "new-fp", previousKeyBackedUp = false)
+
+    var syncState = app.snowfold.core.SyncStatus(null, false, false, null,
+        app.snowfold.core.SyncPolicy(true, 30u, true))
+    override fun syncStatus() = syncState
+    override fun configureSync(config: app.snowfold.core.SyncConfig, secret: String) {
+        syncState = syncState.copy(config = config, enabled = false, lastSyncedAt = null)
+    }
+    override fun setSyncEnabled(enabled: Boolean) { syncState = syncState.copy(enabled = enabled) }
+    override fun clearSyncConfig() { syncState = syncState.copy(config = null, enabled = false, lastSyncedAt = null) }
+    override fun setSyncPolicy(policy: app.snowfold.core.SyncPolicy) { syncState = syncState.copy(policy = policy) }
+    override fun syncNow(transport: app.snowfold.core.SyncTransport): app.snowfold.core.SyncReport =
+        error("测试须提供显式同步入口")
 
     override fun clearData() {
         assets.clear()

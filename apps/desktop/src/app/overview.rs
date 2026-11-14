@@ -27,10 +27,17 @@ impl SnowFold {
         let net = total.and_then(|v| v.checked_sub(debt));
         let weekday = ["日", "一", "二", "三", "四", "五", "六"]
             [chrono::Datelike::weekday(&today()).num_days_from_sunday() as usize];
-        let mut body = div().flex().flex_col().child(p.head(
-            "总览".into(),
-            format!("{} 星期{} · 数据已保存在本机", today_cn(), weekday).into(),
-        ));
+        let mut body = div().flex().flex_col().child(
+            div()
+                .flex()
+                .items_start()
+                .justify_between()
+                .child(p.head(
+                    "总览".into(),
+                    format!("{} 星期{} · 数据已保存在本机", today_cn(), weekday).into(),
+                ))
+                .child(self.sync_button(p, cx)),
+        );
         if overflow || total.is_none() {
             body = body.child(
                 p.panel()

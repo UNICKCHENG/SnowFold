@@ -180,6 +180,7 @@ fun SubscriptionsScreen(
     paneLayout: Boolean = false,
     focusGroup: Int = -1,
     modifier: Modifier = Modifier,
+    syncAction: @Composable () -> Unit = {},
 ) {
     val tokens = appColors()
     PageScaffold(
@@ -194,6 +195,7 @@ fun SubscriptionsScreen(
             IconButton(onClick = onNewSubscription) {
                 Icon(appIcon(AppIcon.plus), contentDescription = stringResource(R.string.new_subscription), tint = tokens.accent)
             }
+            syncAction()
         },
     ) { pad ->
         val listState = rememberLazyListState()

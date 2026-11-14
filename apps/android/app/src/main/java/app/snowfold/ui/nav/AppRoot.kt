@@ -56,6 +56,10 @@ fun AppRoot(vm: MainViewModel, expanded: Boolean, wideTablet: Boolean = false) {
     var notice by remember { mutableStateOf<UiMessage?>(null) }
     LaunchedEffect(vm) { vm.messages.collect { notice = it } }
     LaunchedEffect(notice) { if (notice != null) { delay(4000); notice = null } }
+    androidx.lifecycle.compose.LifecycleStartEffect(vm) {
+        vm.onForeground()
+        onStopOrDispose { vm.onBackground() }
+    }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         if (vm.state.value is AppState.Ready) vm.refresh()
     }
@@ -81,7 +85,7 @@ fun AppRoot(vm: MainViewModel, expanded: Boolean, wideTablet: Boolean = false) {
                     modifier = Modifier.weight(1f),
                     containerColor = colors.canvas,
                     bottomBar = {
-                        Column {
+                        Column(if (expanded) Modifier.navigationBarsPadding() else Modifier) {
                             FeedbackBars(vm, notice, onDismiss = { notice = null })
                             if (!expanded) NavigationBar(containerColor = colors.card, tonalElevation = 0.dp) {
                                 NAV_ITEMS.forEach { item ->
@@ -172,7 +176,8 @@ private fun AppNavGraph(
         composable(ROUTE_OVERVIEW) {
             app.snowfold.ui.overview.OverviewScreen(ui, banner, overflow, onOpenSettings, wideTablet = expanded, contentWidth = contentWidth,
                 onGoAssets = { vm.closeEditor(); nav.navigateToTab("$ROUTE_ASSETS?focus=$it") },
-                onGoSubscriptions = { vm.closeEditor(); nav.navigateToTab("$ROUTE_SUBSCRIPTIONS?focus=$it") }, expanded = expanded)
+                onGoSubscriptions = { vm.closeEditor(); nav.navigateToTab("$ROUTE_SUBSCRIPTIONS?focus=$it") }, expanded = expanded,
+                syncAction = { SyncButton(vm) })
         }
         composable("$ROUTE_ASSETS?focus={focus}", arguments = listOf(navArgument("focus") { type = NavType.IntType; defaultValue = -1 })) { entry ->
             app.snowfold.ui.assets.AssetsScreen(vm, ui, banner, onOpenSettings, paneLayout = paneLayout,
@@ -191,7 +196,7 @@ private fun AppNavGraph(
                     onRenew = vm::renewSubscription, onPauseToggle = vm::setSubscriptionPaused, onDelete = vm::deleteSubscription,
                     selectedSubscriptionId = (editor as? Editor.Subscription)?.id,
                     expanded = expanded, paneLayout = paneLayout, focusGroup = entry.arguments?.getInt("focus") ?: -1,
-                    modifier = Modifier.weight(1f))
+                    modifier = Modifier.weight(1f), syncAction = { if (expanded) SyncButton(vm) })
                 if (paneLayout) Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(16.dp).testTag("subscription-pane")) {
                     val target = editor
                     if (target is Editor.Subscription || target is Editor.NewSubscription) {

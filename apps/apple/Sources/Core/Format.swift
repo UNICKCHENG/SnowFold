@@ -77,7 +77,7 @@ enum Fmt {
         return "\(yearPrefix)\(month)月\(day)日 \(String(format: "%02d:%02d", hour, minute))"
     }
 
-    private static func parseRFC3339(_ text: String) -> Date? {
+    static func parseRFC3339(_ text: String) -> Date? {
         let base = text.split(separator: ".")[0]
         let trimmed = base.hasSuffix("Z") ? String(base.dropLast()) : String(base)
         var comps = DateComponents()
@@ -94,6 +94,14 @@ enum Fmt {
         let utcDate = calendar.date(from: comps)
         guard let utcDate else { return nil }
         return utcDate
+    }
+
+    static func syncTime(_ value: String, now: Date = Date()) -> String {
+        guard let date = parseRFC3339(value) else { return value }
+        let age = max(0, now.timeIntervalSince(date))
+        if age < 60 { return Copy.syncRelativeJustNow }
+        if age < 3600 { return Copy.syncRelativeMinutes(Int(age / 60)) }
+        return timestamp(value)
     }
 
     // MARK: 统计

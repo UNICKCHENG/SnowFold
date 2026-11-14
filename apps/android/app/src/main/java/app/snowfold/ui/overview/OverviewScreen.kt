@@ -46,6 +46,7 @@ fun OverviewScreen(
     wideTablet: Boolean = false,
     contentWidth: Int = 0,
     modifier: Modifier = Modifier,
+    syncAction: @Composable () -> Unit = {},
 ) {
     PageScaffold(
         title = stringResource(R.string.overview_title),
@@ -56,6 +57,7 @@ fun OverviewScreen(
                     Icon(AppIcon.settings, stringResource(R.string.cd_settings))
                 }
             }
+            syncAction()
         },
     ) { pad ->
         Column(

@@ -13,8 +13,18 @@ impl SnowFold {
         let Some(action) = self.confirm.clone() else {
             return;
         };
+        if matches!(action, Confirm::ClearSync) {
+            self.clear_sync(cx);
+            return;
+        }
+        if self.sync.busy {
+            self.error = Some(super::sync::sync_error(snowfold_core::CoreError::Conflict).into());
+            cx.notify();
+            return;
+        }
         let mut replaced_key: Option<(String, bool)> = None;
         let result = match action {
+            Confirm::ClearSync => unreachable!(),
             Confirm::Clear => self
                 .storage
                 .as_mut()
@@ -38,17 +48,9 @@ impl SnowFold {
                 old_fingerprint,
             } => {
                 let outcome = (|| -> Result<bool> {
-                    let key = SyncKey::decode_file(&text)
-                        .context("恢复码内容无法解析，本机密钥未改变")?;
-                    let directory = self.data_directory()?;
-                    let store = self.key_store()?;
-                    // 对话框打开期间另一个实例可能已经换过密钥：以安全存储当前值为准。
-                    let current = keystore::recovery_fingerprint(&directory, store.as_ref())?;
-                    if current != old_fingerprint {
-                        bail!("本机同步密钥已被其他窗口修改，请重新导入恢复码");
-                    }
-                    keystore::store_verified(store.as_ref(), &key)?;
-                    Ok(current.is_some() && directory.join("snowfold-sync.key.bak").is_file())
+                    let core = self.sync.core.as_ref().context("数据库不可用")?;
+                    let result = core.import_recovery_code(text.to_string(), old_fingerprint)?;
+                    Ok(result.previous_key_backed_up)
                 })();
                 match outcome {
                     Ok(backed_up) => {
@@ -77,6 +79,7 @@ impl SnowFold {
                 None => self.notice = Some("数据已更新".into()),
             }
         }
+        self.refresh_sync();
         self.finish(result, window, cx);
     }
     pub(super) fn export(&mut self, cx: &mut gpui::Context<Self>) {
@@ -159,14 +162,14 @@ impl SnowFold {
         .detach();
     }
     /// 数据目录：数据库与平台包裹后的密钥密文。
-    fn data_directory(&self) -> Result<std::path::PathBuf> {
+    pub(super) fn data_directory(&self) -> Result<std::path::PathBuf> {
         self.storage
             .as_ref()
             .and_then(|storage| storage.data_dir())
             .map(|directory| directory.to_path_buf())
             .context("数据库不可用")
     }
-    fn key_store(&self) -> Result<Arc<dyn SecureKeyStore>> {
+    pub(super) fn key_store(&self) -> Result<Arc<dyn SecureKeyStore>> {
         let directory = self.data_directory()?;
         #[cfg(all(windows, not(test)))]
         {
@@ -293,20 +296,12 @@ impl SnowFold {
     }
     /// 导出同步密钥恢复码，换机或重装后用它恢复加密备份。
     pub(super) fn export_recovery_code(&mut self, cx: &mut gpui::Context<Self>) {
-        let prepared = self.load_key().map(|key| {
-            let fingerprint = key.fingerprint();
-            // 恢复码是密钥的明文副本，写入文件后立刻从内存清零。
-            let contents = zeroize::Zeroizing::new(format!(
-                "# SnowFold 同步密钥恢复码\n\
-                 # 密钥指纹：{fingerprint}\n\
-                 # 任何拿到这个文件的人都能解密你的加密备份；请离线保存，不要上传网盘或发给别人。\n\
-                 # 换机或重装后，在「设置 · 加密备份 · 导入恢复码」中选择本文件即可。\n\
-                 {}\n{}\n",
-                crypto::KEY_FILE_HEADER,
-                key.to_hex()
-            ));
-            (contents, fingerprint)
-        });
+        let prepared = (|| -> Result<_> {
+            let core = self.sync.core.as_ref().context("数据库不可用")?;
+            let contents = zeroize::Zeroizing::new(core.export_recovery_code()?);
+            let fingerprint = core.key_fingerprint()?.context("同步密钥不可用")?;
+            Ok((contents, fingerprint))
+        })();
         let (contents, fingerprint) = match prepared {
             Ok(value) => value,
             Err(e) => {
@@ -337,6 +332,8 @@ impl SnowFold {
                 match result {
                     Ok(true) => {
                         this.notice = Some(format!("恢复码已导出 · 密钥指纹 {fingerprint}"));
+                        this.key_fingerprint = Some(fingerprint.clone());
+                        this.refresh_sync();
                         this.error = None;
                     }
                     Ok(false) => {}

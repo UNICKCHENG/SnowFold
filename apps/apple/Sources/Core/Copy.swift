@@ -25,6 +25,15 @@ enum Copy {
         case .Database: return "无法读写本机数据库"
         case .Overflow: return "金额合计超出整数范围，请检查数据"
         case .Internal: return "核心状态不可用，请重新打开"
+        case .RecoveryCodeRequired: return "请先导出恢复码再开启同步"
+        case .SyncNotConfigured: return "尚未配置同步存储"
+        case .SyncDisabled: return "同步未开启"
+        case .SyncNetwork: return "无法连接同步服务，请检查网络与服务地址后重试"
+        case .SyncAuthentication: return "同步服务拒绝访问，请检查账号、密钥与权限"
+        case .SyncConflict: return "其他设备正在同步，请稍后重试"
+        case .SyncRemoteKeyMismatch: return "远端数据无法用本机同步密钥解密，本机与远端都未改动。请确认两台设备导入的是同一个恢复码"
+        case .SyncInvalidRemote: return "远端同步数据不完整或服务不支持条件写入，本机数据未改变"
+        case .SyncIncompatible: return "远端数据来自更新版本的 SnowFold，请先升级"
         }
     }
 
@@ -193,7 +202,66 @@ enum Copy {
     static let keyNotGenerated = "尚未生成"
     static let recoveryCodeHelp = "换机或重装后恢复加密备份；请离线保存，不要放云盘同步目录。"
     static let aboutVersion = "SnowFold · MVP 0.1"
-    static let aboutOffline = "离线运行 · 无网络请求"
+    static let aboutOffline = "默认离线运行 · 仅在开启同步后联网"
+
+    // MARK: 同步（docs/copy.md「同步」）
+
+    static let settingsSyncHeader = "同步"
+    static let syncHelp = "数据先用本机同步密钥加密再上传，服务器只能看到密文。只在你打开应用或点「立即同步」时联网。"
+    static let syncBackendLabel = "存储类型"
+    static let syncBackendS3 = "S3 兼容存储"
+    static let syncBackendWebDAV = "WebDAV"
+    static let syncEndpointLabel = "服务地址"
+    static let syncBucketLabel = "存储桶"
+    static let syncRegionLabel = "区域"
+    static let syncPrefixLabel = "路径前缀（可选）"
+    static let syncPathStyleLabel = "使用路径风格地址"
+    static let syncAccessKeyLabel = "Access Key ID"
+    static let syncSecretKeyLabel = "Secret Access Key"
+    static let syncUsernameLabel = "用户名"
+    static let syncPasswordLabel = "密码"
+    static let syncSecretReenterHelp = "密钥与密码加密保存在本机，不会显示；修改配置时需要重新输入。"
+    static let syncSaveConfig = "保存配置"
+    static let syncEnable = "开启同步"
+    static let syncNow = "立即同步"
+    static let syncClearConfig = "清除配置"
+    static let syncNeverSynced = "尚未同步"
+    static let syncInProgress = "正在同步…"
+    static let syncRecoveryRequiredHelp = "开启同步前请先导出恢复码。换机或另一台设备要用同一个恢复码才能解密同步数据。"
+    static let syncPairingHelp = "在另一台设备上导入本机的恢复码，并填写相同的存储配置，即可同步同一份数据。"
+    static let syncPolicyHeader = "同步策略"
+    static let syncOnLaunchLabel = "打开应用时同步"
+    static let syncIntervalLabel = "自动同步"
+    static let syncIntervalOff = "关闭"
+    static let syncInterval15m = "每 15 分钟"
+    static let syncInterval30m = "每 30 分钟"
+    static let syncInterval1h = "每小时"
+    static let syncAfterEditLabel = "修改后自动同步"
+    static let syncIntervalHelp = "自动同步只在应用打开时进行，关闭应用后不会在后台联网。"
+    static let syncButtonA11y = "立即同步"
+    static let syncButtonFailedA11y = "上次同步失败，点击重试"
+    static let syncRelativeJustNow = "刚刚"
+    static let syncClearConfirmationTitle = "清除同步配置？"
+    static let syncClearConfirmationBody = "将删除本机保存的存储地址与凭证，并停止同步。远端数据、本机数据和同步密钥都不受影响。"
+    static let syncConfigSaved = "同步配置已保存"
+    static let syncEnabled = "同步已开启"
+    static let syncDisabled = "同步已关闭"
+    static let syncConfigCleared = "同步配置已清除"
+    static let syncPendingChanges = "同步期间有新改动，下次同步时上传"
+    static let syncBusy = "正在同步或修改配置，请稍后再试"
+    static let syncConfigInvalid = "请检查服务地址（须为 https://）、存储桶、区域与凭证"
+
+    static func syncLastSynced(_ time: String) -> String { "上次同步 \(time)" }
+    static func syncButtonTooltip(_ time: String) -> String { "立即同步 · 上次同步 \(time)" }
+    static func syncRelativeMinutes(_ minutes: Int) -> String { "\(minutes) 分钟前" }
+    static func syncCompleted(_ report: SyncReport) -> String {
+        "同步完成 · 拉取 \(report.pulledRecords) 条 · 上传 \(report.pushedRecords) 条"
+    }
+    static func syncMessage(for error: Error, configuration: Bool = false) -> String {
+        if error as? CoreError == .Conflict { return syncBusy }
+        if configuration, error as? CoreError == .Validation { return syncConfigInvalid }
+        return userMessage(for: error)
+    }
     static let emptySummary = "—"
 
     // MARK: 确认弹层

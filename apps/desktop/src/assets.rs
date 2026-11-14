@@ -6,7 +6,7 @@ use std::borrow::Cow;
 /// application stays fully offline.
 pub struct AppAssets;
 
-const LOCAL_ICONS: [(&str, &[u8]); 9] = [
+const LOCAL_ICONS: [(&str, &[u8]); 10] = [
     (
         "icons/wallet.svg",
         include_bytes!("../../../shared/icons/ui/wallet.svg"),
@@ -42,6 +42,10 @@ const LOCAL_ICONS: [(&str, &[u8]); 9] = [
     (
         "icons/mark.svg",
         include_bytes!("../../../shared/icons/ui/mark.svg"),
+    ),
+    (
+        "icons/refresh-cw.svg",
+        include_bytes!("../../../shared/icons/ui/refresh-cw.svg"),
     ),
 ];
 

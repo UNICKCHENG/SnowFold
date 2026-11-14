@@ -128,6 +128,17 @@ fun SettingsScreen(
             if (text == null) vm.notifyImportReadFailed() else vm.prepareReplaceKey(text)
         }
     }
+    val exportRecovery: () -> Unit = {
+        scope.launch {
+            runCatching { vm.exportRecoveryCodeWithFingerprint() }
+                .onSuccess { (code, fingerprint) ->
+                    pendingRecovery = code
+                    pendingRecoveryFingerprint = fingerprint
+                    exportRecoveryLauncher.launch("snowfold-recovery-code.txt")
+                }
+                .onFailure { vm.notifyExportFailed(detailRes = app.snowfold.data.coreErrorRes(it), templateRes = R.string.recovery_export_failed) }
+        }
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -146,7 +157,8 @@ fun SettingsScreen(
                     Text(stringResource(R.string.close), style = SnowFoldType.body, color = tokens.accent)
                 }
             }
-            Text(stringResource(R.string.settings_title), style = SnowFoldType.statValue, color = tokens.ink, modifier = Modifier.padding(start = 4.dp))
+            Text(stringResource(R.string.settings_title), style = SnowFoldType.statValue, color = tokens.ink, modifier = Modifier.weight(1f).padding(start = 4.dp))
+            if (!showClose) app.snowfold.ui.components.SyncButton(vm)
         }
         val state by vm.state.collectAsStateWithLifecycle()
         val theme = (state as? app.snowfold.AppState.Ready)?.theme
@@ -257,17 +269,7 @@ fun SettingsScreen(
                 SettingRow(
                     title = stringResource(R.string.export_recovery_code),
                     help = stringResource(R.string.recovery_code_help),
-                    onClick = {
-                        scope.launch {
-                            runCatching { vm.exportRecoveryCodeWithFingerprint() }
-                                .onSuccess { (code, fingerprint) ->
-                                    pendingRecovery = code
-                                    pendingRecoveryFingerprint = fingerprint
-                                    exportRecoveryLauncher.launch("snowfold-recovery-code.txt")
-                                }
-                                .onFailure { vm.notifyExportFailed(detailRes = app.snowfold.data.coreErrorRes(it), templateRes = R.string.recovery_export_failed) }
-                        }
-                    },
+                    onClick = exportRecovery,
                 )
                 SettingRow(
                     title = stringResource(R.string.import_recovery_code),
@@ -293,6 +295,8 @@ fun SettingsScreen(
                 )
             }
         }
+
+        SyncSettings(vm, onExportRecovery = exportRecovery)
 
         AppCard {
             Column(Modifier.padding(16.dp)) {

@@ -127,6 +127,7 @@ impl SnowFold {
         })();
         match result {
             Ok(undo) => {
+                self.sync_edited();
                 self.editing = None;
                 if let Some(undo) = undo {
                     self.offer_undo(undo, "已记录本次变动", cx);

@@ -413,9 +413,10 @@ private fun displayTimestamp(value: String): String = runCatching {
 
 @Composable
 private fun CorrectionHistory(vm: MainViewModel, id: String) {
-    var rows by remember(id) { mutableStateOf<List<MainViewModel.CorrectionUi>?>(null) }
-    var failure by remember(id) { mutableStateOf<app.snowfold.UiMessage?>(null) }
-    LaunchedEffect(id) {
+    val syncRevision by vm.syncRevision.collectAsStateWithLifecycle()
+    var rows by remember(id, syncRevision) { mutableStateOf<List<MainViewModel.CorrectionUi>?>(null) }
+    var failure by remember(id, syncRevision) { mutableStateOf<app.snowfold.UiMessage?>(null) }
+    LaunchedEffect(id, syncRevision) {
         try { rows = vm.correctionsFor(id) }
         catch (error: app.snowfold.core.CoreException) {
             failure = app.snowfold.UiMessage(R.string.operation_failed, argRes = listOf(app.snowfold.data.coreErrorRes(error)))

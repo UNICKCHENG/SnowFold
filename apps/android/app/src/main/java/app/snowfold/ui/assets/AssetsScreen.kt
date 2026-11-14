@@ -116,6 +116,7 @@ fun AssetsScreen(
                         Icon(AppIcon.plus, stringResource(R.string.add), tint = tokens.accent)
                     }
                 }
+                if (expanded) app.snowfold.ui.components.SyncButton(vm)
             },
         ) { pad ->
             if (paneLayout) {

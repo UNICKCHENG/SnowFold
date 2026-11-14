@@ -17,6 +17,11 @@ import app.snowfold.core.SubscriptionGroup
 import app.snowfold.core.SubscriptionInput
 import app.snowfold.core.ThemePreference
 import app.snowfold.core.UndoTicket
+import app.snowfold.core.SyncConfig
+import app.snowfold.core.SyncPolicy
+import app.snowfold.core.SyncStatus
+import app.snowfold.core.SyncReport
+import app.snowfold.core.SyncTransport
 import app.snowfold.core.formatMoney
 import app.snowfold.core.parseAmount
 import java.time.LocalDate
@@ -62,6 +67,12 @@ interface LedgerGateway {
     fun exportRecoveryCode(): String
     fun inspectRecoveryCode(contents: String): RecoveryCodeInfo
     fun importRecoveryCode(contents: String, expectedCurrentFingerprint: String?): KeyImportResult
+    fun syncStatus(): SyncStatus
+    fun configureSync(config: SyncConfig, secret: String)
+    fun setSyncEnabled(enabled: Boolean)
+    fun clearSyncConfig()
+    fun setSyncPolicy(policy: SyncPolicy)
+    fun syncNow(transport: SyncTransport): SyncReport
     fun clearData()
     fun startupBackup()
     fun parseAmount(value: String): Long
@@ -102,6 +113,12 @@ class RustLedgerGateway(private val core: SnowFoldCore) : LedgerGateway {
     override fun importRecoveryCode(contents: String, expectedCurrentFingerprint: String?): KeyImportResult =
         core.importRecoveryCode(contents, expectedCurrentFingerprint)
 
+    override fun syncStatus(): SyncStatus = core.syncStatus()
+    override fun configureSync(config: SyncConfig, secret: String) = core.configureSync(config, secret)
+    override fun setSyncEnabled(enabled: Boolean) = core.setSyncEnabled(enabled)
+    override fun clearSyncConfig() = core.clearSyncConfig()
+    override fun setSyncPolicy(policy: SyncPolicy) = core.setSyncPolicy(policy)
+    override fun syncNow(transport: SyncTransport): SyncReport = core.syncNow(transport)
     override fun clearData() = core.clearData()
     override fun startupBackup() = core.startupBackup()
     override fun parseAmount(value: String): Long = app.snowfold.core.parseAmount(value)
@@ -109,12 +126,10 @@ class RustLedgerGateway(private val core: SnowFoldCore) : LedgerGateway {
     override fun formatMoney(amountCents: Long, currency: String): String = app.snowfold.core.formatMoney(amountCents, currency)
 }
 
-/**
- * Serializes every core call onto one worker, as required by the contract
- * (the core internally locks, but hosts must also serialize their calls).
- */
+/** 普通调用保持串行；同步网络等待走独立 IO，允许期间本机业务写入。 */
 interface CoreAccess {
     suspend fun <T> call(block: (LedgerGateway) -> T): T
+    suspend fun sync(transport: SyncTransport): SyncReport = call { it.syncNow(transport) }
 }
 
 class SerializedCoreAccess(private val dataDir: String, private val keyStore: SecureKeyStore) : CoreAccess {
@@ -140,6 +155,10 @@ class SerializedCoreAccess(private val dataDir: String, private val keyStore: Se
             gateway ?: RustLedgerGateway(SnowFoldCore.open(dataDir, keyStore)).also { gateway = it }
         }
 
+    override suspend fun sync(transport: SyncTransport): SyncReport = withContext(Dispatchers.IO) {
+        access().syncNow(transport)
+    }
+
     override suspend fun <T> call(block: (LedgerGateway) -> T): T = withContext(dispatcher) {
         block(access())
     }
@@ -148,6 +167,15 @@ class SerializedCoreAccess(private val dataDir: String, private val keyStore: Se
 /** Stable localization for core failures; never surface Rust Display strings. */
 @StringRes
 fun coreErrorRes(error: Throwable): Int = when (error) {
+    is CoreException.RecoveryCodeRequired -> R.string.error_recovery_code_required
+    is CoreException.SyncNotConfigured -> R.string.error_sync_not_configured
+    is CoreException.SyncDisabled -> R.string.error_sync_disabled
+    is CoreException.SyncNetwork -> R.string.error_sync_network
+    is CoreException.SyncAuthentication -> R.string.error_sync_authentication
+    is CoreException.SyncConflict -> R.string.error_sync_conflict
+    is CoreException.SyncRemoteKeyMismatch -> R.string.error_sync_remote_key_mismatch
+    is CoreException.SyncInvalidRemote -> R.string.error_sync_invalid_remote
+    is CoreException.SyncIncompatible -> R.string.error_sync_incompatible
     is CoreException.Validation -> R.string.error_validation
     is CoreException.NotFound -> R.string.error_not_found
     is CoreException.Conflict -> R.string.error_conflict

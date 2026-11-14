@@ -1,5 +1,5 @@
 //! Host boundary: integer cents, ISO dates, stable errors, and one serialized connection.
-use crate::{backup, crypto, keystore, model, storage};
+use crate::{backup, crypto, keystore, model, storage, sync};
 use chrono::NaiveDate;
 use std::{
     fmt,
@@ -22,6 +22,15 @@ pub enum CoreError {
     Database,
     Overflow,
     Internal,
+    RecoveryCodeRequired,
+    SyncNotConfigured,
+    SyncDisabled,
+    SyncNetwork,
+    SyncAuthentication,
+    SyncConflict,
+    SyncRemoteKeyMismatch,
+    SyncInvalidRemote,
+    SyncIncompatible,
 }
 impl fmt::Display for CoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -39,6 +48,15 @@ impl fmt::Display for CoreError {
             Self::Database => "无法读写本机数据库",
             Self::Overflow => "金额合计超出整数范围，请检查数据",
             Self::Internal => "核心状态不可用，请重新打开",
+            Self::RecoveryCodeRequired => "recovery_code_required",
+            Self::SyncNotConfigured => "sync_not_configured",
+            Self::SyncDisabled => "sync_disabled",
+            Self::SyncNetwork => "sync_network",
+            Self::SyncAuthentication => "sync_authentication",
+            Self::SyncConflict => "sync_conflict",
+            Self::SyncRemoteKeyMismatch => "sync_remote_key_mismatch",
+            Self::SyncInvalidRemote => "sync_invalid_remote",
+            Self::SyncIncompatible => "sync_incompatible",
         })
     }
 }
@@ -63,6 +81,9 @@ pub trait SecureKeyStore: Send + Sync + std::any::Any {
 }
 
 fn boundary_error(error: anyhow::Error, fallback: CoreError) -> CoreError {
+    if let Some(error) = error.downcast_ref::<CoreError>() {
+        return *error;
+    }
     if error
         .downcast_ref::<storage::IncompatibleDatabase>()
         .is_some()
@@ -363,6 +384,77 @@ pub struct RenewalResult {
     pub periods: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, uniffi::Enum)]
+pub enum SyncBackend {
+    S3,
+    WebDav,
+}
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, uniffi::Record)]
+#[serde(deny_unknown_fields)]
+pub struct SyncConfig {
+    pub backend: SyncBackend,
+    pub endpoint: String,
+    pub bucket: String,
+    pub region: String,
+    pub prefix: String,
+    pub username: String,
+    pub path_style: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct SyncPolicy {
+    pub on_launch: bool,
+    pub interval_minutes: u32,
+    pub after_edit: bool,
+}
+impl Default for SyncPolicy {
+    fn default() -> Self {
+        Self {
+            on_launch: true,
+            interval_minutes: 30,
+            after_edit: true,
+        }
+    }
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct SyncStatus {
+    pub config: Option<SyncConfig>,
+    pub enabled: bool,
+    pub recovery_code_exported: bool,
+    pub last_synced_at: Option<String>,
+    pub policy: SyncPolicy,
+}
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct SyncReport {
+    pub pulled_records: u64,
+    pub pushed_records: u64,
+    pub merged_records: u64,
+    pub last_synced_at: String,
+    pub retries: u32,
+    pub pending_local_changes: bool,
+}
+#[derive(Clone, uniffi::Record)]
+pub struct SyncHeader {
+    pub name: String,
+    pub value: String,
+}
+#[derive(Clone, uniffi::Record)]
+pub struct SyncRequest {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<SyncHeader>,
+    pub body: Vec<u8>,
+}
+#[derive(Clone, uniffi::Record)]
+pub struct SyncResponse {
+    pub status: u16,
+    pub headers: Vec<SyncHeader>,
+    pub body: Vec<u8>,
+}
+#[uniffi::export(with_foreign)]
+pub trait SyncTransport: Send + Sync {
+    fn send(&self, request: SyncRequest) -> std::result::Result<SyncResponse, CoreError>;
+}
+
 struct State {
     storage: storage::Storage,
     key_store: Arc<dyn SecureKeyStore>,
@@ -419,8 +511,12 @@ impl State {
 #[derive(uniffi::Object)]
 pub struct SnowFoldCore {
     state: Mutex<State>,
+    sync_gate: Mutex<()>,
 }
 impl SnowFoldCore {
+    fn sync_guard(&self) -> Result<MutexGuard<'_, ()>> {
+        self.sync_gate.try_lock().map_err(|_| CoreError::Conflict)
+    }
     fn lock(&self) -> Result<MutexGuard<'_, State>> {
         self.state.lock().map_err(|_| CoreError::Internal)
     }
@@ -448,6 +544,7 @@ impl SnowFoldCore {
         let storage = db(storage::Storage::open(&directory.join("snowfold.sqlite3")))?;
         Ok(Arc::new(Self {
             state: Mutex::new(State { storage, key_store }),
+            sync_gate: Mutex::new(()),
         }))
     }
     pub fn data(&self) -> Result<LedgerData> {
@@ -680,6 +777,7 @@ impl SnowFoldCore {
         Ok(BackupInfo::from(&parse_backup(&json)?))
     }
     pub fn import_json(&self, json: String) -> Result<()> {
+        let _guard = self.sync_guard()?;
         let mut s = self.lock()?;
         let backup = parse_backup(&json)?;
         db(s.storage.replace_data(&backup))?;
@@ -694,6 +792,7 @@ impl SnowFoldCore {
         inspect_sealed(&bytes, &s.key()?)
     }
     pub fn import_sealed(&self, bytes: Vec<u8>) -> Result<SealedBackupInfo> {
+        let _guard = self.sync_guard()?;
         let mut s = self.lock()?;
         let key = s.key()?;
         inspect_sealed(&bytes, &key)?;
@@ -706,6 +805,7 @@ impl SnowFoldCore {
     pub fn export_recovery_code(&self) -> Result<String> {
         let s = self.lock()?;
         let key = s.key()?;
+        s.storage.mark_recovery_exported(&key.fingerprint())?;
         Ok(format!(
             "# SnowFold 同步密钥恢复码\n# 密钥指纹：{}\n# 任何拿到这个文件的人都能解密你的加密备份；请离线保存，不要上传网盘或发给别人。\n# 换机或重装后，在「设置 · 加密备份 · 导入恢复码」中选择本文件即可。\n{}\n{}\n",
             key.fingerprint(),
@@ -729,6 +829,7 @@ impl SnowFoldCore {
         contents: String,
         expected_current_fingerprint: Option<String>,
     ) -> Result<KeyImportResult> {
+        let _guard = self.sync_guard()?;
         let s = self.lock()?;
         let contents = zeroize::Zeroizing::new(contents);
         let key =
@@ -736,6 +837,10 @@ impl SnowFoldCore {
         let current = s.recovery_fingerprint()?;
         if current != expected_current_fingerprint {
             return Err(CoreError::Conflict);
+        }
+        // 先禁用旧配置再换钥匙：安全存储与 SQLite 不能跨系统原子提交，失败时宁可失去配置。
+        if current.as_deref() != Some(key.fingerprint().as_str()) {
+            s.storage.clear_sync_config()?;
         }
         keystore::store_verified(s.key_store.as_ref(), &key)?;
         // 只有测试/开发用 FileKeyStore 保留旧文件备份；系统存储不会生成明文 .bak。
@@ -752,6 +857,71 @@ impl SnowFoldCore {
         let mut s = self.lock()?;
         db(s.storage.clear_data())?;
         Ok(())
+    }
+    pub fn sync_status(&self) -> Result<SyncStatus> {
+        let s = self.lock()?;
+        s.storage.sync_status(s.fingerprint()?.as_deref())
+    }
+    pub fn set_sync_policy(&self, policy: SyncPolicy) -> Result<()> {
+        let _guard = self.sync_guard()?;
+        if !matches!(policy.interval_minutes, 0 | 15 | 30 | 60) {
+            return Err(CoreError::Validation);
+        }
+        self.lock()?.storage.set_sync_policy(&policy)
+    }
+    pub fn configure_sync(&self, config: SyncConfig, secret: String) -> Result<()> {
+        let _guard = self.sync_guard()?;
+        let secret = zeroize::Zeroizing::new(secret);
+        sync::protocol::validate(&config)?;
+        let s = self.lock()?;
+        s.storage.configure_sync(&config, &secret, &s.key()?)
+    }
+    pub fn set_sync_enabled(&self, enabled: bool) -> Result<()> {
+        let _guard = self.sync_guard()?;
+        let s = self.lock()?;
+        if enabled {
+            let key = s.key()?;
+            let status = s.storage.sync_status(Some(&key.fingerprint()))?;
+            let config = status.config.ok_or(CoreError::SyncNotConfigured)?;
+            if !status.recovery_code_exported {
+                return Err(CoreError::RecoveryCodeRequired);
+            }
+            s.storage.sync_secret(&config, &key)?;
+        }
+        s.storage.set_sync_enabled(enabled)
+    }
+    pub fn clear_sync_config(&self) -> Result<()> {
+        let _guard = self.sync_guard()?;
+        self.lock()?.storage.clear_sync_config()
+    }
+    pub fn sync_now(&self, transport: Arc<dyn SyncTransport>) -> Result<SyncReport> {
+        let _guard = self.sync_guard()?;
+        let (config, secret, key, local) = {
+            let s = self.lock()?;
+            let status = s.storage.sync_status(s.fingerprint()?.as_deref())?;
+            let config = status.config.ok_or(CoreError::SyncNotConfigured)?;
+            if !status.enabled {
+                return Err(CoreError::SyncDisabled);
+            }
+            if !status.recovery_code_exported {
+                return Err(CoreError::RecoveryCodeRequired);
+            }
+            let key = s.key()?;
+            let secret = s.storage.sync_secret(&config, &key)?;
+            (config, secret, key, db(s.storage.backup_snapshot())?)
+        };
+        let (pushed, mut report) =
+            sync::exchange(&config, &secret, &key, &local, transport.as_ref())?;
+        let mut s = self.lock()?;
+        // 最新读取、合并与写回共用 SQLite IMMEDIATE 事务，不能只靠本对象的进程内锁。
+        let at = report.last_synced_at.clone();
+        db(s.storage.finish_sync(&at, |latest| {
+            let final_data = sync::merge::merge(&pushed, latest)?;
+            report.pending_local_changes = !sync::merge::equivalent(&pushed, &final_data)?;
+            report.merged_records = sync::merge::changed(&local, &final_data)?;
+            Ok(final_data)
+        }))?;
+        Ok(report)
     }
     pub fn startup_backup(&self) -> Result<()> {
         let s = self.lock()?;

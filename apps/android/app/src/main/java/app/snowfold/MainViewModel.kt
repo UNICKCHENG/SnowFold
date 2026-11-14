@@ -7,6 +7,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
+import app.snowfold.core.SyncConfig
+import app.snowfold.core.SyncPolicy
+import app.snowfold.core.SyncStatus
+import app.snowfold.core.SyncTransport
 import app.snowfold.core.BackupInfo
 import app.snowfold.core.CoreException
 import app.snowfold.core.RecoveryCodeInfo
@@ -107,6 +111,7 @@ class MainViewModel(
     private val savedState: SavedStateHandle,
     private val core: CoreAccess,
     private val now: () -> Long = System::currentTimeMillis,
+    private val syncTransport: SyncTransport = app.snowfold.platform.AndroidSyncTransport(),
 ) : ViewModel() {
 
     /** True while a core write is in flight; double taps are ignored. */
@@ -160,6 +165,20 @@ class MainViewModel(
     private var undoReceivedAt = 0L
     private var highlightJob: kotlinx.coroutines.Job? = null
 
+    private val _syncStatus = MutableStateFlow<SyncStatus?>(null)
+    val syncStatus: StateFlow<SyncStatus?> = _syncStatus
+    private val _syncRevision = MutableStateFlow(0L)
+    val syncRevision: StateFlow<Long> = _syncRevision
+    private val _syncing = MutableStateFlow(false)
+    val syncing: StateFlow<Boolean> = _syncing
+    private val _syncError = MutableStateFlow<Int?>(null)
+    val syncError: StateFlow<Int?> = _syncError
+    private var foreground = false
+    private var intervalJob: kotlinx.coroutines.Job? = null
+    private var editSyncJob: kotlinx.coroutines.Job? = null
+    private var editDueAt: Long? = null
+    private var lastAttemptAt: Long? = null
+
     init {
         boot()
     }
@@ -194,6 +213,8 @@ class MainViewModel(
             }
             closeEditorIfMissing(ui)
             _state.value = AppState.Ready(ui, theme, fingerprint, banner)
+            refreshSyncStatus()
+            if (foreground && _syncStatus.value?.policy?.onLaunch == true) syncNow(manual = false)
         }
     }
 
@@ -234,6 +255,9 @@ class MainViewModel(
 
     /** 编辑 sheet 打开期间该记录被删：刷新后发现目标不存在就关 sheet 并提示。 */
     private fun closeEditorIfMissing(ui: UiLedger) {
+        correctionId.value?.let { id ->
+            if (ui.assets.none { asset -> asset.history.any { it.id == id } }) closeCorrection()
+        }
         when (val target = _editor.value) {
             is Editor.Asset -> if (ui.assets.none { it.id == target.id }) {
                 closeEditor()
@@ -282,6 +306,7 @@ class MainViewModel(
                     _snackbar.value = null
                 }
                 reload(notifyOnFailure = true)
+                localEditSucceeded()
                 if (outcome.closeEditor) closeEditor()
                 if (outcome.closeCorrection) closeCorrection()
                 outcome.successMessage?.let { _messages.trySend(it) }
@@ -334,6 +359,7 @@ class MainViewModel(
         viewModelScope.launch {
             try {
                 core.call { it.undo(ticket.token) }
+                localEditSucceeded()
                 undoPending = null
                 _snackbar.value = null
                 refresh()
@@ -457,6 +483,7 @@ class MainViewModel(
         viewModelScope.launch {
             try {
                 val result = core.call { it.renewSubscription(id, LocalDate.now()) }
+                localEditSucceeded()
                 undoPending = null
                 _snackbar.value = null
                 _messages.trySend(UiMessage(R.string.subscription_renewed, args = listOf(result.periods.toString())))
@@ -585,6 +612,7 @@ class MainViewModel(
                         }
                         _messages.trySend(message)
                         updateReady(fingerprint = fingerprint)
+                        refreshSyncStatus()
                         return@launch
                     }
                 }
@@ -594,6 +622,8 @@ class MainViewModel(
                 _snackbar.value = null
                 closeEditor()
                 refresh()
+                refreshSyncStatus()
+                localEditSucceeded()
                 _messages.trySend(UiMessage(R.string.data_updated))
             } catch (error: CoreException.Conflict) {
                 if (pending is PendingConfirm.ReplaceKey) {
@@ -650,7 +680,7 @@ class MainViewModel(
 
     suspend fun exportSealedPayload(): ByteArray = core.call { it.exportSealed() }
 
-    suspend fun exportRecoveryCodePayload(): String = core.call { it.exportRecoveryCode() }
+    suspend fun exportRecoveryCodePayload(): String = exportRecoveryCodeWithFingerprint().first
 
     suspend fun exportSealedWithFingerprint(): Pair<ByteArray, String?> = core.call { g ->
         g.exportSealed() to g.keyFingerprint()
@@ -658,6 +688,9 @@ class MainViewModel(
 
     suspend fun exportRecoveryCodeWithFingerprint(): Pair<String, String?> = core.call { g ->
         g.exportRecoveryCode() to g.keyFingerprint()
+    }.also {
+        updateReady(fingerprint = it.second)
+        refreshSyncStatus()
     }
 
     fun refreshFingerprintInState(fingerprint: String?) {
@@ -682,6 +715,137 @@ class MainViewModel(
 
     fun notifyExportFailed(detailRes: Int = R.string.error_io, templateRes: Int = R.string.export_failed) {
         _messages.trySend(UiMessage(templateRes, argRes = listOf(detailRes)))
+    }
+
+    // 同步触发统一进单飞入口；网络等待不占普通业务写的 busy 状态。
+    suspend fun refreshSyncStatus() {
+        try {
+            _syncStatus.value = core.call { it.syncStatus() }
+            scheduleSyncTimers()
+        } catch (error: CoreException) {
+            _syncError.value = coreErrorRes(error)
+        }
+    }
+
+    fun onForeground() {
+        if (foreground) return
+        foreground = true
+        viewModelScope.launch {
+            if (_state.value !is AppState.Ready) return@launch
+            refreshSyncStatus()
+            if (_syncStatus.value?.policy?.onLaunch == true) syncNow(manual = false)
+        }
+    }
+
+    fun onBackground() {
+        foreground = false
+        intervalJob?.cancel()
+        editSyncJob?.cancel()
+    }
+
+    private fun scheduleSyncTimers() {
+        intervalJob?.cancel()
+        editSyncJob?.cancel()
+        val status = _syncStatus.value ?: return
+        if (!foreground || !status.enabled || status.config == null) return
+        val minutes = status.policy.intervalMinutes.toLong()
+        if (minutes > 0) {
+            val synced = status.lastSyncedAt?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
+            val anchor = maxOf(synced ?: now(), lastAttemptAt ?: 0L)
+            intervalJob = viewModelScope.launch {
+                delay((anchor + minutes * 60_000L - now()).coerceAtLeast(1L))
+                syncNow(manual = false)
+            }
+        }
+        editDueAt?.let { due ->
+            editSyncJob = viewModelScope.launch {
+                delay((due - now()).coerceAtLeast(1L))
+                editDueAt = null
+                syncNow(manual = false)
+            }
+        }
+    }
+
+    private fun localEditSucceeded() {
+        if (_syncStatus.value?.let { it.enabled && it.policy.afterEdit } != true) return
+        editDueAt = now() + 30_000L
+        scheduleSyncTimers()
+    }
+
+    fun syncNow(manual: Boolean = true) {
+        val status = _syncStatus.value ?: return
+        if (_syncing.value || !status.enabled || status.config == null || (!manual && !foreground)) return
+        _syncing.value = true
+        lastAttemptAt = now()
+        intervalJob?.cancel()
+        editSyncJob?.cancel()
+        editDueAt = null
+        viewModelScope.launch {
+            try {
+                val report = core.sync(syncTransport)
+                _syncError.value = null
+                undoPending = null
+                _snackbar.value = null
+                reload(notifyOnFailure = true)
+                // 现存编辑草稿保留，修正日志重新读取同步后的核心数据。
+                _syncRevision.value += 1
+                if (manual) _messages.trySend(UiMessage(R.string.sync_completed,
+                    args = listOf(report.pulledRecords.toString(), report.pushedRecords.toString())))
+                if (report.pendingLocalChanges) editDueAt = now() + 30_000L
+            } catch (_: CoreException.Conflict) {
+                // 核心配置互斥或其他入口已在同步，按契约静默。
+            } catch (error: CoreException) {
+                _syncError.value = coreErrorRes(error)
+                if (manual) _messages.trySend(UiMessage(coreErrorRes(error)))
+            } finally {
+                _syncing.value = false
+                refreshSyncStatus()
+            }
+        }
+    }
+
+    fun configureSync(config: SyncConfig, secret: String) {
+        syncSetting(R.string.sync_config_saved) { it.configureSync(config, secret) }
+    }
+
+    fun setSyncEnabled(enabled: Boolean) {
+        syncSetting(if (enabled) R.string.sync_enabled else R.string.sync_disabled) { it.setSyncEnabled(enabled) }
+    }
+
+    fun setSyncPolicy(policy: SyncPolicy) {
+        syncSetting(null) { it.setSyncPolicy(policy) }
+    }
+
+    fun clearSyncConfig() {
+        syncSetting(R.string.sync_config_cleared) { it.clearSyncConfig() }
+    }
+
+    private fun syncSetting(successRes: Int?, block: (LedgerGateway) -> Unit) {
+        if (busy.value) return
+        if (_syncing.value) {
+            _messages.trySend(UiMessage(R.string.error_sync_busy))
+            return
+        }
+        busy.value = true
+        viewModelScope.launch {
+            try {
+                core.call(block)
+                _syncError.value = null
+                editDueAt = null
+                lastAttemptAt = null
+                refreshSyncStatus()
+                successRes?.let { _messages.trySend(UiMessage(it)) }
+            } catch (error: CoreException) {
+                val res = when (error) {
+                    is CoreException.Validation -> R.string.error_sync_config_invalid
+                    is CoreException.Conflict -> R.string.error_sync_busy
+                    else -> coreErrorRes(error)
+                }
+                _messages.trySend(UiMessage(res))
+            } finally {
+                busy.value = false
+            }
+        }
     }
 
     companion object {
@@ -723,6 +887,17 @@ private val ERROR_MESSAGE_RESOURCES = setOf(
     R.string.theme_not_saved,
     R.string.renewal_not_due,
     R.string.saved_but_reload_failed,
+    R.string.error_recovery_code_required,
+    R.string.error_sync_not_configured,
+    R.string.error_sync_disabled,
+    R.string.error_sync_network,
+    R.string.error_sync_authentication,
+    R.string.error_sync_conflict,
+    R.string.error_sync_remote_key_mismatch,
+    R.string.error_sync_invalid_remote,
+    R.string.error_sync_incompatible,
+    R.string.error_sync_busy,
+    R.string.error_sync_config_invalid,
     R.string.error_validation,
     R.string.error_not_found,
     R.string.error_conflict,

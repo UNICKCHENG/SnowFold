@@ -52,11 +52,18 @@ impl SnowFold {
                 .mb(px(34.))
                 .child(p.head("订阅".into(), sub.into()))
                 .child(
-                    p.button("new-subscription", "＋ 新建订阅")
-                        .bg(p.card)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.begin(Editing::NewSubscription, window, cx)
-                        })),
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            p.button("new-subscription", "＋ 新建订阅")
+                                .bg(p.card)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.begin(Editing::NewSubscription, window, cx)
+                                })),
+                        )
+                        .child(self.sync_button(p, cx)),
                 ),
         );
         match model::totals(&self.data.subscriptions, today()) {

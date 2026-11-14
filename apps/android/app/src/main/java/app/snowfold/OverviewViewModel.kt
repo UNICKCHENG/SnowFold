@@ -55,18 +55,4 @@ class OverviewViewModel(application: Application) : AndroidViewModel(application
 
 // UniFFI's flat error variants have empty messages; use their stable categories.
 @StringRes
-private fun CoreException.descriptionResource(): Int = when (this) {
-    is CoreException.Validation -> R.string.error_validation
-    is CoreException.NotFound -> R.string.error_not_found
-    is CoreException.Conflict -> R.string.error_conflict
-    is CoreException.Authentication -> R.string.error_authentication
-    is CoreException.IncompatibleBackup -> R.string.error_incompatible_backup
-    is CoreException.InvalidBackup -> R.string.error_invalid_backup
-    is CoreException.InvalidRecoveryCode -> R.string.error_invalid_recovery_code
-    is CoreException.KeyUnavailable -> R.string.error_key_unavailable
-    is CoreException.Io -> R.string.error_io
-    is CoreException.Database -> R.string.error_database
-    is CoreException.IncompatibleDatabase -> R.string.error_incompatible_database
-    is CoreException.Overflow -> R.string.error_overflow
-    is CoreException.Internal -> R.string.error_internal
-}
+private fun CoreException.descriptionResource(): Int = app.snowfold.data.coreErrorRes(this)

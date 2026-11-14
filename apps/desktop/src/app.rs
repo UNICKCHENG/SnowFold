@@ -7,6 +7,7 @@ mod overview;
 mod render;
 mod state;
 mod subscriptions;
+mod sync;
 
 pub(crate) use actions::bind_keys;
 pub(crate) use state::SnowFold;

@@ -88,6 +88,7 @@ struct SettingsView: View {
             appearanceSection
             backupSection
             keySection
+            SyncSettingsSection(exportRecovery: beginRecoveryExport)
             dataSection
             aboutSection
         }
@@ -99,6 +100,7 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(Color.canvas)
         .navigationTitle(Copy.settingsTitle)
+        .toolbar { ToolbarItem(placement: .primaryAction) { PageSyncToolbarEntry() } }
         .alert(Copy.clearConfirmationTitle, isPresented: $clearConfirm) {
             Button(Copy.cancel, role: .cancel) {}
             Button(Copy.confirmOverwrite, role: .destructive) {

@@ -391,10 +391,17 @@ impl SnowFold {
         div()
             .flex()
             .flex_col()
-            .child(p.head(
-                "资产与负债".into(),
-                format!("{} 项记录 · 5 个固定分类", self.data.assets.len()).into(),
-            ))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .child(p.head(
+                        "资产与负债".into(),
+                        format!("{} 项记录 · 5 个固定分类", self.data.assets.len()).into(),
+                    ))
+                    .child(self.sync_button(p, cx)),
+            )
             .child(div().h(px(34.)).flex_none())
             .child(sum_bar)
             .child(div().h(px(34.)).flex_none())

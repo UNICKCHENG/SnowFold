@@ -31,6 +31,7 @@ pub(super) enum Popover {
 #[derive(Clone)]
 pub(super) enum Confirm {
     Clear,
+    ClearSync,
     Import(Backup),
     /// 已通过认证解密的加密备份：拿到用户确认后再替换数据。
     ImportSealed {
@@ -55,6 +56,7 @@ pub(crate) struct SnowFold {
     pub(super) notice: Option<String>,
     /// 同步密钥指纹；`None` 表示本机还没有可用的同步密钥。
     pub(super) key_fingerprint: Option<String>,
+    pub(super) sync: super::sync::SyncUi,
     pub(super) focus: FocusHandle,
     _appearance: gpui::Subscription,
     pub(super) editing: Option<Editing>,
@@ -140,6 +142,7 @@ impl SnowFold {
             error: None,
             notice: None,
             key_fingerprint: None,
+            sync: super::sync::SyncUi::new(window, cx),
             focus,
             _appearance: cx.observe_window_appearance(window, |this, window, cx| {
                 this.sync_theme(window, cx);
@@ -188,6 +191,9 @@ impl SnowFold {
                 ))
             }
         }
+        if view.storage.is_some() {
+            view.initialize_sync(window, cx);
+        }
         view.sync_theme(window, cx);
         view
     }
@@ -222,6 +228,9 @@ impl SnowFold {
             self.modal_focus.focus(window);
         } else {
             self.focus.focus(window);
+        }
+        if result.is_ok() {
+            self.sync_edited();
         }
         match result.and_then(|_| self.reload()) {
             Ok(()) => self.error = None,
@@ -261,6 +270,7 @@ impl SnowFold {
         self.popover = None;
         self.confirm = None;
         self.settings = false;
+        self.sync.form.clear_secret(window, cx);
         if self.storage.is_some() {
             self.error = None;
         }
@@ -277,6 +287,7 @@ impl SnowFold {
             if self.settings {
                 self.modal_focus.focus(window);
             } else {
+                self.sync.form.clear_secret(window, cx);
                 self.focus.focus(window);
             }
             cx.notify();

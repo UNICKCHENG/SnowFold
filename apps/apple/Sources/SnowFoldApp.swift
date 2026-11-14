@@ -21,10 +21,13 @@ struct SnowFoldApp: App {
             let operations = captureArguments.contains("-SNOWFOLD_KEYCHAIN_FAILURE")
                 ? KeychainKeyStore.Operations(copyMatching: { _, _ in errSecInteractionNotAllowed })
                 : KeychainKeyStore.Operations()
+            let transport: any SyncTransport = captureArguments.contains("-SNOWFOLD_SYNC_ACCEPTANCE")
+                ? CaptureSyncTransport() : URLSessionSyncTransport()
             _store = State(initialValue: SnowFoldStore(
                 dataDirectory: FileManager.default.temporaryDirectory
                     .appendingPathComponent(captureArguments[index + 1], isDirectory: true),
-                keyStore: KeychainKeyStore(account: captureArguments[index + 1], operations: operations)
+                keyStore: KeychainKeyStore(account: captureArguments[index + 1], operations: operations),
+                syncTransport: transport
             ))
             #if os(macOS)
             // 仅验收启动：使用常规宽窗口，避免沿用之前的窗口恢复尺寸。

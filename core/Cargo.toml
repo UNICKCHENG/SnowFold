@@ -7,6 +7,10 @@ publish.workspace = true
 [lib]
 crate-type = ["rlib", "staticlib", "cdylib"]
 
+[features]
+default = []
+sync-http = ["dep:ureq"]
+
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
@@ -20,6 +24,10 @@ aes-gcm = { version = "0.11.1", features = ["zeroize"] }
 sha2 = "0.10"
 hex = "0.4"
 getrandom = "0.3"
+hmac = "0.12"
+base64 = "0.22"
+url = "2"
+ureq = { version = "2.12", default-features = false, features = ["tls"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }

@@ -43,7 +43,7 @@
 | encrypted_backup_section | 加密备份 | 设置分区及行标题 |
 | about_section | 关于 | 设置分区 |
 | app_version | SnowFold · MVP 0.1 | 关于行 |
-| offline_description | 离线运行 · 无网络请求 | 关于说明 |
+| offline_description | 默认离线运行 · 仅在开启同步后联网 | 关于说明 |
 | category_cash | 流动资金 | 固定分类 cash |
 | category_fixed | 固定资产 | 固定分类 fixed |
 | category_investment | 投资理财 | 固定分类 investment |
@@ -211,6 +211,92 @@
 | statistics_error | 统计错误：{detail} | 总览订阅统计错误 |
 | statistics_failed | 统计失败：{detail} | 订阅页统计错误 |
 | renewal_not_due | 下次扣费日尚未到达，无需顺延 | 未到期续费 |
+
+## 同步
+
+同步设置、页面右上角同步按钮与同步错误。{time} 用 sync_relative_* 或本地日期时间显示。
+
+### 设置 · 同步
+
+| key | 中文文案 | 用途 |
+| --- | --- | --- |
+| settings_sync_header | 同步 | 设置分区标题 |
+| sync_help | 数据先用本机同步密钥加密再上传，服务器只能看到密文。只在你打开应用或点「立即同步」时联网。 | 分区说明 |
+| sync_backend_label | 存储类型 | 选择器标签 |
+| sync_backend_s3 | S3 兼容存储 | 选项 |
+| sync_backend_webdav | WebDAV | 选项 |
+| sync_endpoint_label | 服务地址 | S3 endpoint / WebDAV 根目录，均须 https:// |
+| sync_bucket_label | 存储桶 | 仅 S3 |
+| sync_region_label | 区域 | 仅 S3 |
+| sync_prefix_label | 路径前缀（可选） | 两种都有 |
+| sync_path_style_label | 使用路径风格地址 | 仅 S3 开关 |
+| sync_access_key_label | Access Key ID | S3 |
+| sync_secret_key_label | Secret Access Key | S3 |
+| sync_username_label | 用户名 | WebDAV |
+| sync_password_label | 密码 | WebDAV |
+| sync_secret_reenter_help | 密钥与密码加密保存在本机，不会显示；修改配置时需要重新输入。 | 凭证字段说明 |
+| sync_save_config | 保存配置 | 按钮 |
+| sync_enable | 开启同步 | 开关/按钮 |
+| sync_now | 立即同步 | 按钮 |
+| sync_clear_config | 清除配置 | 按钮 |
+| sync_last_synced | 上次同步 {time} | 状态行 |
+| sync_never_synced | 尚未同步 | 状态行 |
+| sync_in_progress | 正在同步… | 状态行 |
+| sync_recovery_required_help | 开启同步前请先导出恢复码。换机或另一台设备要用同一个恢复码才能解密同步数据。 | 未导出恢复码时的说明 |
+| sync_pairing_help | 在另一台设备上导入本机的恢复码，并填写相同的存储配置，即可同步同一份数据。 | 配对说明 |
+| sync_policy_header | 同步策略 | 分组标题 |
+| sync_on_launch_label | 打开应用时同步 | 开关，默认开；手机回到前台也算打开 |
+| sync_interval_label | 自动同步 | 选择器 |
+| sync_interval_off | 关闭 | 选项 |
+| sync_interval_15m | 每 15 分钟 | 选项 |
+| sync_interval_30m | 每 30 分钟 | 选项，默认 |
+| sync_interval_1h | 每小时 | 选项 |
+| sync_after_edit_label | 修改后自动同步 | 开关，默认开；最后一次修改 30 秒后同步 |
+| sync_interval_help | 自动同步只在应用打开时进行，关闭应用后不会在后台联网。 | 策略说明 |
+
+### 页面右上角同步按钮（仅开启同步后显示）
+
+| key | 中文文案 | 用途 |
+| --- | --- | --- |
+| sync_button_a11y | 立即同步 | 图标按钮的辅助功能标签 |
+| sync_button_tooltip | 立即同步 · 上次同步 {time} | 桌面/Mac 悬停提示；未同步过用 sync_never_synced |
+| sync_button_failed_a11y | 上次同步失败，点击重试 | 失败状态的辅助功能标签 |
+| sync_relative_just_now | 刚刚 | {time} 在 1 分钟内 |
+| sync_relative_minutes | {minutes} 分钟前 | {time} 在 1 小时内 |
+
+### 确认弹层
+
+| key | 中文文案 | 用途 |
+| --- | --- | --- |
+| sync_clear_confirmation_title | 清除同步配置？ | 标题 |
+| sync_clear_confirmation_body | 将删除本机保存的存储地址与凭证，并停止同步。远端数据、本机数据和同步密钥都不受影响。 | 正文 |
+
+### 操作反馈
+
+| key | 中文文案 | 用途 |
+| --- | --- | --- |
+| sync_config_saved | 同步配置已保存 | 保存成功 |
+| sync_enabled | 同步已开启 | 开启成功 |
+| sync_disabled | 同步已关闭 | 关闭成功 |
+| sync_config_cleared | 同步配置已清除 | 清除成功 |
+| sync_completed | 同步完成 · 拉取 {pulled} 条 · 上传 {pushed} 条 | 同步成功 |
+| sync_pending_changes | 同步期间有新改动，下次同步时上传 | 报告 pending_local_changes 为真 |
+
+### 错误（按 CoreError 映射）
+
+| key | 中文文案 | CoreError |
+| --- | --- | --- |
+| error_recovery_code_required | 请先导出恢复码再开启同步 | RecoveryCodeRequired |
+| error_sync_not_configured | 尚未配置同步存储 | SyncNotConfigured |
+| error_sync_disabled | 同步未开启 | SyncDisabled |
+| error_sync_network | 无法连接同步服务，请检查网络与服务地址后重试 | SyncNetwork |
+| error_sync_authentication | 同步服务拒绝访问，请检查账号、密钥与权限 | SyncAuthentication |
+| error_sync_conflict | 其他设备正在同步，请稍后重试 | SyncConflict |
+| error_sync_remote_key_mismatch | 远端数据无法用本机同步密钥解密，本机与远端都未改动。请确认两台设备导入的是同一个恢复码 | SyncRemoteKeyMismatch |
+| error_sync_invalid_remote | 远端同步数据不完整或服务不支持条件写入，本机数据未改变 | SyncInvalidRemote |
+| error_sync_incompatible | 远端数据来自更新版本的 SnowFold，请先升级 | SyncIncompatible |
+| error_sync_busy | 正在同步或修改配置，请稍后再试 | Conflict（同步互斥） |
+| error_sync_config_invalid | 请检查服务地址（须为 https://）、存储桶、区域与凭证 | Validation（配置） |
 
 ## FFI 错误描述
 

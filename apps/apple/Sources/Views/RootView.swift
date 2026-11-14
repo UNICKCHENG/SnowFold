@@ -75,13 +75,14 @@ struct StartupFailureView: View {
 // MARK: - 设置入口
 
 extension View {
-    func settingsToolbar() -> some View { settingsToolbar { EmptyView() } }
+    func settingsToolbar() -> some View { settingsToolbar(syncOnPhone: true) { EmptyView() } }
 
-    func settingsToolbar<Actions: View>(@ViewBuilder actions: () -> Actions) -> some View {
+    func settingsToolbar<Actions: View>(syncOnPhone: Bool = false, @ViewBuilder actions: () -> Actions) -> some View {
         toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 SettingsToolbarEntry()
                 actions()
+                if syncOnPhone { PageSyncToolbarEntry(showOnPhone: true) }
             }
         }
     }
@@ -138,6 +139,7 @@ struct RootView: View {
     @Environment(Router.self) private var router
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var sceneID = UUID()
 
     var body: some View {
         Group {
@@ -151,12 +153,17 @@ struct RootView: View {
                 readyContent
             }
         }
-        .task { await store.open() }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                Task { await store.refreshIfReady() }
-            }
+        .task {
+            await store.open()
+            #if DEBUG
+            await SyncAcceptance.prepareIfRequested(store)
+            #endif
+            await store.setSceneActive(sceneID, active: scenePhase == .active)
         }
+        .onChange(of: scenePhase) { _, phase in
+            Task { await store.setSceneActive(sceneID, active: phase == .active) }
+        }
+        .onDisappear { Task { await store.setSceneActive(sceneID, active: false) } }
         .preferredColorScheme(store.theme.colorScheme)
     }
 
@@ -266,9 +273,14 @@ struct SplitRootView: View {
                 get: { newAssetCategory.map(CategoryPick.init) },
                 set: { newAssetCategory = $0?.code }
             )) { pick in AssetEditorSheet(mode: .new(categoryCode: pick.code)) }
-            .task { await store.open() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await store.refreshIfReady() } }
+            .onChange(of: store.syncGeneration) { _, _ in
+                if let id = selectedAssetID, !store.ledger.assets.contains(where: { $0.id == id }) {
+                    selectedAssetID = nil
+                }
+                if let record = selectedSubscription,
+                   !store.ledger.subscriptions.contains(where: { $0.id == record.id }) {
+                    selectedSubscription = nil
+                }
             }
             .preferredColorScheme(store.theme.colorScheme)
             // 窗口级判断：iPad 分屏变窄（无侧边栏）时恢复右上角设置；列表列的
@@ -285,7 +297,10 @@ struct SplitRootView: View {
                 NavigationStack { listContent }
                     .navigationSplitViewColumnWidth(min: 240, ideal: 320, max: 400)
             } detail: {
-                NavigationStack { selectionDetail }
+                NavigationStack {
+                    selectionDetail
+                        .toolbar { ToolbarItem(placement: .primaryAction) { PageSyncToolbarEntry() } }
+                }
                     .bannerOverlay()
             }
             .navigationSplitViewStyle(.balanced)
