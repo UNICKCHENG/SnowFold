@@ -102,7 +102,7 @@ jobs:
             "iPhone 16" "iPhone 17" "iPhone 16 Pro" "iPhone 17 Pro" "iPhone 15")
           ipad_type=$(xcrun simctl list devicetypes -j | python3 /tmp/pick_devicetype.py \
             "iPad Air 11-inch (M3)" "iPad Air 11-inch (M2)" "iPad Air (5th generation)" "iPad Air" "iPad")
-          echo "机型：$iphone_type / $ipad_type（runtime $runtime）"
+          echo "机型：${iphone_type} / ${ipad_type}（runtime ${runtime}）"
           xcrun simctl delete snowfold-apple-iphone 2>/dev/null || true
           xcrun simctl delete snowfold-apple-ipad 2>/dev/null || true
           xcrun simctl create snowfold-apple-iphone "$iphone_type" "$runtime"
