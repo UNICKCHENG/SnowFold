@@ -251,6 +251,7 @@ fun SettingsScreen(
                     color = tokens.ink3,
                     modifier = Modifier.padding(top = 2.dp),
                 )
+                Text(stringResource(R.string.key_storage_location), style = SnowFoldType.helper, color = tokens.ink3)
             }
             Column {
                 SettingRow(

@@ -1,5 +1,5 @@
 //! Host boundary: integer cents, ISO dates, stable errors, and one serialized connection.
-use crate::{backup, crypto, model, storage};
+use crate::{backup, crypto, keystore, model, storage};
 use chrono::NaiveDate;
 use std::{
     fmt,
@@ -34,7 +34,7 @@ impl fmt::Display for CoreError {
             Self::IncompatibleBackup => "不支持的备份版本或加密格式",
             Self::InvalidBackup => "备份内容不完整或不合法，原数据未改变",
             Self::InvalidRecoveryCode => "恢复码不合法，本机密钥未改变",
-            Self::KeyUnavailable => "同步密钥不可用，请检查密钥文件或导入恢复码",
+            Self::KeyUnavailable => "本机密钥已失效，请用恢复码恢复",
             Self::Io => "无法读写文件，请检查目录与权限",
             Self::Database => "无法读写本机数据库",
             Self::Overflow => "金额合计超出整数范围，请检查数据",
@@ -44,6 +44,23 @@ impl fmt::Display for CoreError {
 }
 impl std::error::Error for CoreError {}
 type Result<T> = std::result::Result<T, CoreError>;
+
+impl From<uniffi::UnexpectedUniFFICallbackError> for CoreError {
+    fn from(_: uniffi::UnexpectedUniFFICallbackError) -> Self {
+        Self::KeyUnavailable
+    }
+}
+
+/// 平台安全存储。宿主负责把 32 字节密钥交给系统钥匙串保管。
+/// load：没有存过返回 Ok(None)；存过但读不出来返回 Err，不能掩盖为 None。
+/// store 接收的密钥副本由宿主负责在使用完后清零。
+/// Any 仅供 Rust 识别内置开发文件后端，不增加 foreign 方法或改变绑定签名。
+#[uniffi::export(with_foreign)]
+pub trait SecureKeyStore: Send + Sync + std::any::Any {
+    fn load(&self) -> std::result::Result<Option<Vec<u8>>, CoreError>;
+    fn store(&self, key: Vec<u8>) -> std::result::Result<(), CoreError>;
+    fn delete(&self) -> std::result::Result<(), CoreError>;
+}
 
 fn boundary_error(error: anyhow::Error, fallback: CoreError) -> CoreError {
     if error
@@ -348,6 +365,7 @@ pub struct RenewalResult {
 
 struct State {
     storage: storage::Storage,
+    key_store: Arc<dyn SecureKeyStore>,
 }
 impl From<storage::Undo> for UndoTicket {
     fn from(ticket: storage::Undo) -> Self {
@@ -379,13 +397,22 @@ impl State {
             .ok_or(CoreError::Internal)
     }
     fn key(&self) -> Result<crypto::SyncKey> {
-        crypto::SyncKey::load_or_create(&self.key_path()?)
-            .map_err(|e| boundary_error(e, CoreError::KeyUnavailable))
+        keystore::load_or_create(
+            self.storage.data_dir().ok_or(CoreError::Internal)?,
+            self.key_store.as_ref(),
+        )
     }
     fn fingerprint(&self) -> Result<Option<String>> {
-        crypto::SyncKey::load(&self.key_path()?)
-            .map(|key| key.map(|k| k.fingerprint()))
-            .map_err(|e| boundary_error(e, CoreError::KeyUnavailable))
+        keystore::fingerprint(
+            self.storage.data_dir().ok_or(CoreError::Internal)?,
+            self.key_store.as_ref(),
+        )
+    }
+    fn recovery_fingerprint(&self) -> Result<Option<String>> {
+        keystore::recovery_fingerprint(
+            self.storage.data_dir().ok_or(CoreError::Internal)?,
+            self.key_store.as_ref(),
+        )
     }
 }
 
@@ -411,7 +438,7 @@ fn inspect_sealed(bytes: &[u8], key: &crypto::SyncKey) -> Result<SealedBackupInf
 #[uniffi::export]
 impl SnowFoldCore {
     #[uniffi::constructor]
-    pub fn open(data_dir: String) -> Result<Arc<Self>> {
+    pub fn open(data_dir: String, key_store: Arc<dyn SecureKeyStore>) -> Result<Arc<Self>> {
         let directory = PathBuf::from(data_dir);
         if !directory.is_absolute() {
             return Err(CoreError::Validation);
@@ -420,7 +447,7 @@ impl SnowFoldCore {
         let directory = std::fs::canonicalize(directory).map_err(|_| CoreError::Io)?;
         let storage = db(storage::Storage::open(&directory.join("snowfold.sqlite3")))?;
         Ok(Arc::new(Self {
-            state: Mutex::new(State { storage }),
+            state: Mutex::new(State { storage, key_store }),
         }))
     }
     pub fn data(&self) -> Result<LedgerData> {
@@ -691,7 +718,7 @@ impl SnowFoldCore {
         let contents = zeroize::Zeroizing::new(contents);
         let key =
             crypto::SyncKey::decode_file(&contents).map_err(|_| CoreError::InvalidRecoveryCode)?;
-        let current_fingerprint = s.fingerprint()?;
+        let current_fingerprint = s.recovery_fingerprint()?;
         Ok(RecoveryCodeInfo {
             current_fingerprint,
             new_fingerprint: key.fingerprint(),
@@ -706,12 +733,16 @@ impl SnowFoldCore {
         let contents = zeroize::Zeroizing::new(contents);
         let key =
             crypto::SyncKey::decode_file(&contents).map_err(|_| CoreError::InvalidRecoveryCode)?;
-        let current = s.fingerprint()?;
+        let current = s.recovery_fingerprint()?;
         if current != expected_current_fingerprint {
             return Err(CoreError::Conflict);
         }
-        let previous_key_backed_up = crypto::SyncKey::replace_file(&s.key_path()?, &key)
-            .map_err(|e| boundary_error(e, CoreError::KeyUnavailable))?;
+        keystore::store_verified(s.key_store.as_ref(), &key)?;
+        // 只有测试/开发用 FileKeyStore 保留旧文件备份；系统存储不会生成明文 .bak。
+        let previous_key_backed_up = current.is_some()
+            && s.key_path()?
+                .with_file_name("snowfold-sync.key.bak")
+                .is_file();
         Ok(KeyImportResult {
             fingerprint: key.fingerprint(),
             previous_key_backed_up,

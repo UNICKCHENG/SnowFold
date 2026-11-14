@@ -81,7 +81,7 @@
 | `IncompatibleBackup` | 未知 format_version 或密封 version、旧 schema_version JSON、裸 Backup 密封载荷 | 保留当前数据，不做降级导入 |
 | `InvalidBackup` | 非法字段、重复 UUID、断链、金额不一致、坏 magic、截断、非法密封元数据 | 显示备份无效；数据不变 |
 | `Authentication` | AES-GCM 认证失败 | 提示错钥或损坏，不区分两者 |
-| `InvalidRecoveryCode` / `KeyUnavailable` / `Io` / `Database` / `Overflow` / `Internal` | 恢复码或密钥文件内容无法解析；密钥文件不可读、创建或替换；数据目录或备份文件读写失败；数据库读写失败；合计金额溢出；核心内部状态异常 | 均不改动业务数据，按 `docs/copy.md` 对应错误键提示 |
+| `InvalidRecoveryCode` / `KeyUnavailable` / `Io` / `Database` / `Overflow` / `Internal` | 恢复码或密钥内容无法解析；系统安全存储读写失败或密钥已失效（不会静默生成新密钥）；数据目录或备份文件读写失败；数据库读写失败；合计金额溢出；核心内部状态异常 | 均不改动业务数据，按 `docs/copy.md` 对应错误键提示 |
 
 ## 写操作后的刷新
 

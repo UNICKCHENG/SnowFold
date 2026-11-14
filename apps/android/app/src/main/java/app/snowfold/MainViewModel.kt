@@ -692,7 +692,9 @@ class MainViewModel(
                         as android.app.Application
                 MainViewModel(
                     savedState = createSavedStateHandle(),
-                    core = app.snowfold.data.SerializedCoreAccess(application.filesDir.absolutePath),
+                    core = app.snowfold.data.SerializedCoreAccess(
+                        application.filesDir.absolutePath, app.snowfold.platform.AndroidSecureKeyStore(application),
+                    ),
                 )
             }
         }

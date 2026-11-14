@@ -25,7 +25,7 @@ func shift(days: Int = 0, months: Int = 0) -> String {
     return dayString(date)
 }
 
-let core = try SnowFoldCore.open(dataDir: dataDirectory)
+let core = try SnowFoldCore.open(dataDir: dataDirectory, keyStore: KeychainKeyStore())
 
 // 主金额回归用：只有这一项资产，净资产恰为 ¥12,345,678.90。
 if arguments.contains("--hero") {

@@ -12,6 +12,7 @@ import app.snowfold.core.RecoveryCodeInfo
 import app.snowfold.core.RenewalResult
 import app.snowfold.core.SealedBackupInfo
 import app.snowfold.core.SnowFoldCore
+import app.snowfold.core.SecureKeyStore
 import app.snowfold.core.SubscriptionGroup
 import app.snowfold.core.SubscriptionInput
 import app.snowfold.core.ThemePreference
@@ -116,7 +117,7 @@ interface CoreAccess {
     suspend fun <T> call(block: (LedgerGateway) -> T): T
 }
 
-class SerializedCoreAccess(private val dataDir: String) : CoreAccess {
+class SerializedCoreAccess(private val dataDir: String, private val keyStore: SecureKeyStore) : CoreAccess {
     private val dispatcher = Dispatchers.IO.limitedParallelism(1)
     private val openMutex = Mutex()
 
@@ -136,7 +137,7 @@ class SerializedCoreAccess(private val dataDir: String) : CoreAccess {
 
     private suspend fun access(): LedgerGateway =
         gateway ?: openMutex.withLock {
-            gateway ?: RustLedgerGateway(SnowFoldCore.open(dataDir)).also { gateway = it }
+            gateway ?: RustLedgerGateway(SnowFoldCore.open(dataDir, keyStore)).also { gateway = it }
         }
 
     override suspend fun <T> call(block: (LedgerGateway) -> T): T = withContext(dispatcher) {

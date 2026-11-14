@@ -39,6 +39,7 @@ targets:
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_ENTITLEMENTS: SnowFold-iOS.entitlements
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
@@ -94,6 +95,28 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.snowfold.snapshots
         TEST_TARGET_NAME: SnowFold-iOS
+  SnowFoldKeychainUI-iOS:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/KeychainAcceptance
+    dependencies:
+      - target: SnowFold-iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.snowfold.keychain-ui
+        TEST_TARGET_NAME: SnowFold-iOS
+  SnowFoldKeychainUI-macOS:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: Tests/KeychainAcceptance
+    dependencies:
+      - target: SnowFold-macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.snowfold.keychain-ui
+        TEST_TARGET_NAME: SnowFold-macOS
 schemes:
   SnowFold-iOS:
     build:
@@ -116,3 +139,19 @@ schemes:
     test:
       targets:
         - SnowFoldSnapshots-iOS
+  SnowFold-keychain-iOS:
+    build:
+      targets:
+        SnowFold-iOS: all
+    test:
+      targets:
+        - SnowFoldTests-iOS
+        - SnowFoldKeychainUI-iOS
+  SnowFold-keychain-macOS:
+    build:
+      targets:
+        SnowFold-macOS: all
+    test:
+      targets:
+        - SnowFoldTests-macOS
+        - SnowFoldKeychainUI-macOS

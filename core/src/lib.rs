@@ -2,6 +2,7 @@
 pub mod backup;
 pub mod crypto;
 pub mod ffi;
+pub mod keystore;
 pub mod model;
 pub mod storage;
 

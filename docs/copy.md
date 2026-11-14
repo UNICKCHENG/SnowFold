@@ -161,7 +161,7 @@
 | import_confirmation_body | 将导入 {assets} 项资产、{history} 条历史、{subscriptions} 项订阅，并覆盖现有数据。此操作不能撤销。 | JSON 导入正文 |
 | sealed_import_confirmation_body | 加密备份导出于 {exported_at}（设备 {device_id}），校验通过：{assets} 项资产、{history} 条历史、{subscriptions} 项订阅。\n确认后会覆盖现有数据，此操作不能撤销；如果导出时间比当前数据旧，请先取消并核对。 | 密封包导入正文 |
 | replace_key_confirmation_title | 替换本机同步密钥？ | 恢复码替换标题 |
-| replace_key_confirmation_body | 当前指纹 {current_fingerprint}，新指纹 {new_fingerprint}。\n替换后，旧密钥导出的加密备份将无法在本机打开；旧密钥会备份为 snowfold-sync.key.bak。只有确认这个恢复码来自你自己的设备时才继续。 | 恢复码替换正文 |
+| replace_key_confirmation_body | 当前指纹 {current_fingerprint}，新指纹 {new_fingerprint}。\n替换后旧密钥不会保留。请先导出当前恢复码，否则旧密钥导出的加密备份将无法在本机打开。只有确认这个恢复码来自你自己的设备时才继续。 | 恢复码替换正文 |
 | choose_json_backup | 选择 SnowFold JSON 备份 | 文件选择标题 |
 | choose_sealed_backup | 选择 SnowFold 加密备份 | 文件选择标题 |
 | choose_recovery_code | 选择 SnowFold 恢复码文件 | 文件选择标题 |

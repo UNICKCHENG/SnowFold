@@ -177,9 +177,7 @@ impl SnowFold {
                 match view.load_key() {
                     Ok(key) => view.key_fingerprint = Some(key.fingerprint()),
                     Err(error) if view.error.is_none() => {
-                        view.error = Some(format!(
-                            "同步密钥不可用：{error:#}。加密备份暂时无法导出或导入；可以在设置里导入恢复码，或处理密钥文件后重启。"
-                        ));
+                        view.error = Some(error.to_string());
                     }
                     Err(_) => {}
                 }
@@ -227,6 +225,12 @@ impl SnowFold {
         }
         match result.and_then(|_| self.reload()) {
             Ok(()) => self.error = None,
+            Err(e)
+                if e.downcast_ref::<snowfold_core::CoreError>()
+                    == Some(&snowfold_core::CoreError::KeyUnavailable) =>
+            {
+                self.error = Some(e.to_string());
+            }
             Err(e) => self.error = Some(format!("操作失败：{e:#}。请检查输入或数据目录后重试。")),
         }
         cx.notify();

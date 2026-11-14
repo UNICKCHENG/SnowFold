@@ -398,6 +398,8 @@ impl Render for SnowFold {
                                                     }),
                                                 ),
                                             ),
+                                            #[cfg(windows)]
+                                            q.sheet_line("密钥位置", "密钥由 Windows 账户凭据保护"),
                                             q.sheet_note(
                                                 "同步密钥指纹",
                                                 self.key_fingerprint
@@ -676,9 +678,15 @@ impl Render for SnowFold {
                 } => (
                     "替换本机同步密钥？",
                     format!(
-                        "当前指纹 {}，新指纹 {}。\n替换后，旧密钥导出的加密备份将无法在本机打开；旧密钥会备份为 snowfold-sync.key.bak。只有确认这个恢复码来自你自己的设备时才继续。",
+                        "当前指纹 {}，新指纹 {}。\n{}只有确认这个恢复码来自你自己的设备时才继续。",
                         old_fingerprint.as_deref().unwrap_or("尚未生成"),
-                        new_fingerprint
+                        new_fingerprint,
+                        // Windows 用 DPAPI 覆盖写入；Mac 开发版与测试的文件密钥仍留 .bak。
+                        if cfg!(windows) {
+                            "替换后旧密钥不会保留。请先导出当前恢复码，否则旧密钥导出的加密备份将无法在本机打开。"
+                        } else {
+                            "替换后，旧密钥导出的加密备份将无法在本机打开；旧密钥会备份为 snowfold-sync.key.bak。"
+                        }
                     ),
                     "确认替换",
                 ),

@@ -14,11 +14,12 @@ final class StoreTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        try KeychainKeyStore(account: directory.lastPathComponent).delete()
         try? FileManager.default.removeItem(at: directory)
     }
 
     private func makeStore() -> SnowFoldStore {
-        SnowFoldStore(dataDirectory: directory)
+        SnowFoldStore(dataDirectory: directory, keyStore: KeychainKeyStore(account: directory.lastPathComponent))
     }
 
     // MARK: 打开与刷新
@@ -134,7 +135,7 @@ final class StoreTests: XCTestCase {
         await store.open()
         let id = try await store.createAsset(categoryCode: "cash", name: "支付宝余额", amountText: "50")
         // 另一个实例删除同一目录里的记录（模拟桌面端同时打开）。
-        let external = try SnowFoldCore.open(dataDir: directory.path)
+        let external = try SnowFoldCore.open(dataDir: directory.path, keyStore: KeychainKeyStore(account: directory.lastPathComponent))
         try external.deleteAsset(id: id)
         await store.refreshIfReady()
         XCTAssertTrue(store.ledger.assets.isEmpty, "后台回前台刷新应看到外部删除")
@@ -374,7 +375,7 @@ final class StoreTests: XCTestCase {
     func testRefreshIfReadyPicksUpExternalData() async throws {
         let store = makeStore()
         await store.open()
-        let external = try SnowFoldCore.open(dataDir: directory.path)
+        let external = try SnowFoldCore.open(dataDir: directory.path, keyStore: KeychainKeyStore(account: directory.lastPathComponent))
         let id = try external.createAsset(categoryCode: "cash", assetName: "外部写入的资产", amountCents: 1234567890)
         XCTAssertTrue(store.ledger.assets.isEmpty)
         await store.refreshIfReady()

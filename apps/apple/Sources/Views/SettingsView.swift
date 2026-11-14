@@ -240,6 +240,8 @@ struct SettingsView: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel("同步密钥指纹 " + (store.keyFingerprint ?? Copy.keyNotGenerated))
+                Text(Copy.keyLocation)
+                    .font(.caption).foregroundStyle(Color.inkMuted)
             }
             settingsRow(title: "导出恢复码", help: Copy.recoveryCodeHelp) {
                 Button(Copy.exportRecoveryButton) { beginRecoveryExport() }.disabled(store.isWorking)
@@ -307,7 +309,7 @@ struct SettingsView: View {
                     try await store.importJSON(pending.text)
                     errorText = nil
                 } catch {
-                    errorText = Copy.importFailedUnchanged(Copy.message(for: error))
+                    errorText = Copy.importFailedUnchanged(Copy.userMessage(for: error))
                 }
             }
         }
@@ -324,7 +326,7 @@ struct SettingsView: View {
                     try await store.importSealed(pending.data)
                     errorText = nil
                 } catch {
-                    errorText = Copy.sealedImportFailedUnchanged(Copy.message(for: error))
+                    errorText = Copy.sealedImportFailedUnchanged(Copy.userMessage(for: error))
                 }
             }
         }
@@ -350,7 +352,7 @@ struct SettingsView: View {
                     )
                     errorText = nil
                 } catch {
-                    errorText = Copy.recoveryImportFailedUnchanged(Copy.message(for: error))
+                    errorText = Copy.recoveryImportFailedUnchanged(Copy.userMessage(for: error))
                 }
             }
         }
@@ -372,7 +374,7 @@ struct SettingsView: View {
                 #endif
                 errorText = nil
             } catch {
-                errorText = Copy.exportFailed(Copy.message(for: error))
+                errorText = Copy.exportFailed(Copy.userMessage(for: error))
             }
         }
     }
@@ -391,7 +393,7 @@ struct SettingsView: View {
                 #endif
                 errorText = nil
             } catch {
-                errorText = Copy.sealedExportFailed(Copy.message(for: error))
+                errorText = Copy.sealedExportFailed(Copy.userMessage(for: error))
             }
         }
     }
@@ -410,7 +412,7 @@ struct SettingsView: View {
                 #endif
                 errorText = nil
             } catch {
-                errorText = Copy.recoveryExportFailed(Copy.message(for: error))
+                errorText = Copy.recoveryExportFailed(Copy.userMessage(for: error))
             }
         }
     }
@@ -434,7 +436,7 @@ struct SettingsView: View {
                     try await work(url)
                     errorText = nil
                 } catch {
-                    errorText = Copy.message(for: error)
+                    errorText = Copy.userMessage(for: error)
                 }
             }
         case .failure:

@@ -55,11 +55,13 @@ final class SnowFoldStore {
     private(set) var highlightID: String?
 
     let dataDirectory: URL
+    private let keyStore: SecureKeyStore
     private var undoExpiryTask: Task<Void, Never>?
     private var highlightTask: Task<Void, Never>?
 
-    init(dataDirectory: URL? = nil) {
+    init(dataDirectory: URL? = nil, keyStore: SecureKeyStore = KeychainKeyStore()) {
         self.dataDirectory = dataDirectory ?? Self.defaultDirectory()
+        self.keyStore = keyStore
     }
 
     static func defaultDirectory() -> URL {
@@ -78,7 +80,7 @@ final class SnowFoldStore {
     func open() async {
         guard core == nil else { return }
         do {
-            let core = try SnowFoldCore.open(dataDir: dataDirectory.path)
+            let core = try SnowFoldCore.open(dataDir: dataDirectory.path, keyStore: keyStore)
             self.core = core
             state = .ready
             await refresh()
@@ -87,18 +89,18 @@ final class SnowFoldStore {
                 keyFingerprint = try await background { try core.keyFingerprint() }
             } catch {
                 if notice == nil {
-                    notice = Copy.startupKeyUnavailable(Copy.message(for: error))
+                    notice = Copy.startupKeyUnavailable(Copy.userMessage(for: error))
                 }
             }
             do {
                 try await background { try core.startupBackup() }
             } catch {
                 if notice == nil {
-                    notice = Copy.startupBackupFailed(Copy.message(for: error))
+                    notice = Copy.startupBackupFailed(Copy.userMessage(for: error))
                 }
             }
         } catch {
-            state = .failed(Copy.localDataUnreadable(Copy.message(for: error)))
+            state = .failed(Copy.localDataUnreadable(Copy.userMessage(for: error)))
         }
     }
 
@@ -127,7 +129,7 @@ final class SnowFoldStore {
             self.groups = groups
             self.annuals = annuals
         } catch {
-            notice = Copy.localDataUnreadable(Copy.message(for: error))
+            notice = Copy.localDataUnreadable(Copy.userMessage(for: error))
             return
         }
         do {
@@ -135,7 +137,7 @@ final class SnowFoldStore {
             overviewError = nil
         } catch {
             overview = nil
-            overviewError = Copy.message(for: error)
+            overviewError = Copy.userMessage(for: error)
         }
     }
 
@@ -163,7 +165,7 @@ final class SnowFoldStore {
         do {
             try await refreshOrThrow()
         } catch {
-            notice = "\(Copy.savedButReloadFailed)：\(Copy.message(for: error))"
+            notice = "\(Copy.savedButReloadFailed)：\(Copy.userMessage(for: error))"
         }
         return value
     }
@@ -189,7 +191,7 @@ final class SnowFoldStore {
             overviewError = nil
         } catch {
             overview = nil
-            overviewError = Copy.message(for: error)
+            overviewError = Copy.userMessage(for: error)
         }
     }
 
@@ -223,7 +225,7 @@ final class SnowFoldStore {
             undoState = nil
         } catch {
             undoState = nil
-            notice = Copy.message(for: error)
+            notice = Copy.userMessage(for: error)
         }
     }
 
@@ -277,7 +279,7 @@ final class SnowFoldStore {
             let ticket = try await write { try $0.deleteAsset(id: id) }
             offerUndo(ticket, Copy.assetDeleted)
         } catch {
-            notice = Copy.message(for: error)
+            notice = Copy.userMessage(for: error)
         }
     }
 
@@ -302,7 +304,7 @@ final class SnowFoldStore {
         do {
             try await write { try $0.setSubscriptionPaused(id: id, isPaused: paused) }
         } catch {
-            notice = Copy.message(for: error)
+            notice = Copy.userMessage(for: error)
         }
     }
 
@@ -313,7 +315,7 @@ final class SnowFoldStore {
             let result = try await write { try $0.renewSubscription(id: id, on: on) }
             notice = Copy.renewed(result.periods)
         } catch {
-            notice = Copy.message(for: error)
+            notice = Copy.userMessage(for: error)
         }
     }
 
@@ -322,7 +324,7 @@ final class SnowFoldStore {
             let ticket = try await write { try $0.deleteSubscription(id: id) }
             offerUndo(ticket, Copy.subscriptionDeleted)
         } catch {
-            notice = Copy.message(for: error)
+            notice = Copy.userMessage(for: error)
         }
     }
 
@@ -333,7 +335,7 @@ final class SnowFoldStore {
             try await write { try $0.saveTheme(theme: theme) }
             self.theme = theme
         } catch {
-            notice = "主题未保存：\(Copy.message(for: error))"
+            notice = "主题未保存：\(Copy.userMessage(for: error))"
         }
     }
 
@@ -404,7 +406,7 @@ final class SnowFoldStore {
             invalidateUndo()
             notice = Copy.dataUpdated
         } catch {
-            notice = Copy.message(for: error)
+            notice = Copy.userMessage(for: error)
         }
     }
 

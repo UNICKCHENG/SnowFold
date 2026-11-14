@@ -28,6 +28,15 @@ enum Copy {
         }
     }
 
+    /// 用户提示单独处理安全存储失败；枚举诊断映射保留兼容。
+    static let secureKeyUnavailable = "本机密钥已失效，请用恢复码恢复"
+    static let keyLocation = "密钥存放在系统钥匙串"
+
+    static func userMessage(for error: Error) -> String {
+        if error as? CoreError == .KeyUnavailable { return secureKeyUnavailable }
+        return message(for: error)
+    }
+
     // MARK: 启动
 
     static func localDataUnreadable(_ detail: String) -> String {
@@ -39,7 +48,7 @@ enum Copy {
     }
 
     static func startupKeyUnavailable(_ detail: String) -> String {
-        "同步密钥不可用：\(detail)。加密备份暂时无法导出或导入；可以在设置里导入恢复码，或处理密钥文件后重启。"
+        secureKeyUnavailable
     }
 
     // MARK: 页面与统计
@@ -201,7 +210,7 @@ enum Copy {
     static let replaceKeyConfirmationTitle = "替换本机同步密钥？"
     static func replaceKeyConfirmationBody(current: String?, new: String) -> String {
         let currentText = current ?? keyNotGenerated
-        return "当前指纹 \(currentText)，新指纹 \(new)。\n替换后，旧密钥导出的加密备份将无法在本机打开；旧密钥会备份为 snowfold-sync.key.bak。只有确认这个恢复码来自你自己的设备时才继续。"
+        return "当前指纹 \(currentText)，新指纹 \(new)。\n替换后旧密钥不会保留。请先导出当前恢复码，否则旧密钥导出的加密备份将无法在本机打开。只有确认这个恢复码来自你自己的设备时才继续。"
     }
 
     // MARK: 反馈

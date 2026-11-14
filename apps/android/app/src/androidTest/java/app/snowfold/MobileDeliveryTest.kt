@@ -35,7 +35,7 @@ class MobileDeliveryTest {
     private val longestName = "招商银行朝朝宝（活期理财）家庭备用金账户"
 
     @Before fun prepare() {
-        core = SnowFoldCore.open(context.filesDir.absolutePath)
+        core = SnowFoldCore.open(context.filesDir.absolutePath, app.snowfold.platform.AndroidSecureKeyStore(context))
         core.clearData()
         core.saveTheme(if (args.getString("captureTheme") == "dark") ThemePreference.DARK else ThemePreference.LIGHT)
         assetId = core.createAsset("cash", longestName, 1200000000L)

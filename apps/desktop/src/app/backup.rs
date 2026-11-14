@@ -5,7 +5,8 @@ use crate::{
 };
 use anyhow::{Context as _, Result, bail};
 use gpui::*;
-use snowfold_core::backup::Backup;
+use snowfold_core::{SecureKeyStore, backup::Backup, keystore};
+use std::sync::Arc;
 
 impl SnowFold {
     pub(super) fn confirm_action(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
@@ -40,13 +41,14 @@ impl SnowFold {
                     let key = SyncKey::decode_file(&text)
                         .context("恢复码内容无法解析，本机密钥未改变")?;
                     let directory = self.data_directory()?;
-                    let key_path = crypto::key_path_for(&directory);
-                    // 对话框打开期间另一个实例可能已经换过密钥：以磁盘当前值为准。
-                    let current = SyncKey::load(&key_path)?.map(|key| key.fingerprint());
+                    let store = self.key_store()?;
+                    // 对话框打开期间另一个实例可能已经换过密钥：以安全存储当前值为准。
+                    let current = keystore::recovery_fingerprint(&directory, store.as_ref())?;
                     if current != old_fingerprint {
                         bail!("本机同步密钥已被其他窗口修改，请重新导入恢复码");
                     }
-                    SyncKey::replace_file(&key_path, &key)
+                    keystore::store_verified(store.as_ref(), &key)?;
+                    Ok(current.is_some() && directory.join("snowfold-sync.key.bak").is_file())
                 })();
                 match outcome {
                     Ok(backed_up) => {
@@ -156,7 +158,7 @@ impl SnowFold {
         })
         .detach();
     }
-    /// 数据目录：数据库与同步密钥放在一起。
+    /// 数据目录：数据库与平台包裹后的密钥密文。
     fn data_directory(&self) -> Result<std::path::PathBuf> {
         self.storage
             .as_ref()
@@ -164,10 +166,26 @@ impl SnowFold {
             .map(|directory| directory.to_path_buf())
             .context("数据库不可用")
     }
-    /// 读取本机同步密钥；不存在时生成一把并写入数据目录（权限 0600）。
+    fn key_store(&self) -> Result<Arc<dyn SecureKeyStore>> {
+        let directory = self.data_directory()?;
+        #[cfg(all(windows, not(test)))]
+        {
+            Ok(Arc::new(keystore::DpapiKeyStore::new(&directory)))
+        }
+        #[cfg(any(test, target_os = "macos"))]
+        {
+            // Mac GPUI 仅供本机开发，发布的 Mac 应用由 SwiftUI + Keychain 提供。
+            // 测试保留旧文件行为，既有交互断言无需依赖操作系统账户。
+            Ok(Arc::new(keystore::FileKeyStore::new(&directory)))
+        }
+    }
+    /// 取密钥与迁移由内核统一执行，Windows 不写明文密钥。
     pub(super) fn load_key(&self) -> Result<SyncKey> {
         let directory = self.data_directory()?;
-        SyncKey::load_or_create(&crypto::key_path_for(&directory))
+        Ok(keystore::load_or_create(
+            &directory,
+            self.key_store()?.as_ref(),
+        )?)
     }
     /// 不允许导出覆盖的文件：数据库、同步密钥及其备份。
     fn protected_targets(&self) -> Vec<std::path::PathBuf> {
@@ -179,6 +197,7 @@ impl SnowFold {
             let key = crypto::key_path_for(directory);
             paths.push(key.clone());
             paths.push(key.with_file_name(format!("{}.bak", crypto::KEY_FILE_NAME)));
+            paths.push(directory.join("snowfold-sync.key.dpapi"));
         }
         paths
     }
@@ -195,7 +214,7 @@ impl SnowFold {
         let (sealed, fingerprint) = match prepared {
             Ok(value) => value,
             Err(e) => {
-                self.error = Some(format!("加密备份导出失败：{e:#}"));
+                self.error = Some(e.to_string());
                 cx.notify();
                 return;
             }
@@ -236,7 +255,7 @@ impl SnowFold {
         let key = match self.load_key() {
             Ok(key) => key,
             Err(e) => {
-                self.error = Some(format!("无法读取同步密钥，加密备份未导入：{e:#}"));
+                self.error = Some(e.to_string());
                 cx.notify();
                 return;
             }
@@ -291,7 +310,7 @@ impl SnowFold {
         let (contents, fingerprint) = match prepared {
             Ok(value) => value,
             Err(e) => {
-                self.error = Some(format!("恢复码导出失败：{e:#}"));
+                self.error = Some(e.to_string());
                 cx.notify();
                 return;
             }
@@ -330,18 +349,19 @@ impl SnowFold {
     }
     /// 导入同步密钥恢复码：先校验并展示新旧指纹，用户确认后才替换本机密钥。
     pub(super) fn import_recovery_code(&mut self, cx: &mut gpui::Context<Self>) {
-        let key_path = match self.data_directory() {
-            Ok(directory) => crypto::key_path_for(&directory),
+        let old_fingerprint = match self.data_directory().and_then(|directory| {
+            Ok(keystore::recovery_fingerprint(
+                &directory,
+                self.key_store()?.as_ref(),
+            )?)
+        }) {
+            Ok(fingerprint) => fingerprint,
             Err(e) => {
                 self.error = Some(format!("恢复码导入失败：{e:#}"));
                 cx.notify();
                 return;
             }
         };
-        let old_fingerprint = SyncKey::load(&key_path)
-            .ok()
-            .flatten()
-            .map(|key| key.fingerprint());
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,

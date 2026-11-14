@@ -1,10 +1,11 @@
 //! 加密同步与加密备份。
 //!
-//! 安全边界（这里只声称这一条）：
+//! 安全边界：
 //! - 离开本机的数据（加密备份、以后同步到服务器的快照）在传输和云端存储中
 //!   不可读、不可篡改；
-//! - 它**不**保护本机文件系统被攻破的情况：密钥文件就放在数据目录里，能读到
-//!   数据库的人也能读到密钥。本机静态保护交给 FileVault / BitLocker。
+//! - 生产宿主通过系统安全存储保管密钥（见 keystore 模块）；本模块保留的明文
+//!   文件 API 仅用于旧文件迁移、测试与 Mac GPUI 开发。本机数据库静态保护
+//!   交给 FileVault / BitLocker，不能防御系统账户失陷或进程内存被读取。
 //!
 //! 设计要点：
 //! - AES-256-GCM；96 位随机 nonce，每次加密都从操作系统 CSPRNG 重新生成；
@@ -104,6 +105,10 @@ impl SyncKey {
         &self.0
     }
 
+    pub(crate) fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
     /// 64 位小写十六进制，用于恢复码文件与跨设备配对。
     pub fn to_hex(&self) -> String {
         hex::encode(self.secret().as_slice())
@@ -185,6 +190,7 @@ impl SyncKey {
     pub fn load(path: &Path) -> Result<Option<Self>> {
         match std::fs::read_to_string(path) {
             Ok(text) => {
+                let text = Zeroizing::new(text);
                 let key = Self::decode_file(&text)
                     .with_context(|| format!("无法解析同步密钥 {}", path.display()))?;
                 enforce_private_permissions(path)?;

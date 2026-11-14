@@ -73,7 +73,7 @@ class AmountLayoutTest {
     /** 仅测试进程使用的核心写入样例，应用没有演示数据入口。 */
     @Test fun seedScreenshotLedger() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val core = app.snowfold.core.SnowFoldCore.open(context.filesDir.absolutePath)
+        val core = app.snowfold.core.SnowFoldCore.open(context.filesDir.absolutePath, app.snowfold.platform.AndroidSecureKeyStore(context))
         try {
             if (core.data().assets.isNotEmpty()) return
             core.createAsset("cash", "招商银行朝朝宝（活期理财）家庭备用金账户", 1234567890L)

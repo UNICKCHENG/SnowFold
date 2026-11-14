@@ -31,7 +31,7 @@ class OverviewViewModel(application: Application) : AndroidViewModel(application
             state = withContext(Dispatchers.IO) {
                 try {
                     // This shell only needs one snapshot; close the Rust handle after the read.
-                    val total = SnowFoldCore.open(application.filesDir.absolutePath).use { core ->
+                    val total = SnowFoldCore.open(application.filesDir.absolutePath, app.snowfold.platform.AndroidSecureKeyStore(application)).use { core ->
                         core.overview(LocalDate.now().toString()).totalAssetsCents
                     }
                     Log.i("SnowFold", "Overview loaded from local core")

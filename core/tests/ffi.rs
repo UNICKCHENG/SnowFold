@@ -5,7 +5,11 @@ use snowfold_core::{
 use std::sync::{Arc, Barrier};
 
 fn open(directory: &tempfile::TempDir) -> Arc<SnowFoldCore> {
-    SnowFoldCore::open(directory.path().to_string_lossy().into_owned()).unwrap()
+    SnowFoldCore::open(
+        directory.path().to_string_lossy().into_owned(),
+        Arc::new(snowfold_core::keystore::FileKeyStore::new(directory.path())),
+    )
+    .unwrap()
 }
 fn subscription() -> SubscriptionInput {
     SubscriptionInput {
@@ -186,7 +190,11 @@ fn baseline_f72e2f0_is_rejected_and_original_totals_are_preserved() -> anyhow::R
     std::fs::write(&path, include_bytes!("fixtures/f72e2f0/billfold.sqlite3"))?;
     let bytes = std::fs::read(&path)?;
     assert_eq!(
-        SnowFoldCore::open(old.path().to_string_lossy().into()).err(),
+        SnowFoldCore::open(
+            old.path().to_string_lossy().into(),
+            Arc::new(snowfold_core::keystore::FileKeyStore::new(old.path()))
+        )
+        .err(),
         Some(CoreError::IncompatibleDatabase)
     );
     assert_eq!(std::fs::read(&path)?, bytes);
