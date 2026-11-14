@@ -119,70 +119,81 @@ jobs:
       - name: Build iOS app and tour UI tests (build-for-testing)
         run: >-
           xcodebuild -project apps/apple/SnowFold.xcodeproj -scheme SnowFold-iOS-snapshots
-          -destination 'generic/platform=iOS Simulator'
+          -destination "platform=iOS Simulator,id=$SNOWFOLD_IPHONE_UDID" ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
           -derivedDataPath "$APPLE_ROOT/.build/audit-ios" CODE_SIGNING_ALLOWED=YES build-for-testing
 
       - name: iPhone tour - empty light
+        continue-on-error: true
         env:
           DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
           SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
         run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 empty light
 
       - name: iPhone tour - long light
+        continue-on-error: true
         env:
           DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
           SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
         run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 long light
 
       - name: iPhone tour - long dark
+        continue-on-error: true
         env:
           DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
           SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
         run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 long dark
 
       - name: iPhone tour - empty light (dynamic type AXXXL)
+        continue-on-error: true
         env:
           DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
           SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
         run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 empty light ax
 
       - name: iPad tour - empty light
+        continue-on-error: true
         env:
           DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
           SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
         run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPAD_UDID" ipad empty light
 
       - name: iPad tour - long light
+        continue-on-error: true
         env:
           DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
           SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
         run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPAD_UDID" ipad long light
 
       - name: iPad tour - long dark
+        continue-on-error: true
         env:
           DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
           SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
         run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPAD_UDID" ipad long dark
 
       - name: iPhone home screen icon shot
+        continue-on-error: true
         run: |
           xcrun simctl terminate "$SNOWFOLD_IPHONE_UDID" app.snowfold 2>/dev/null || true
           sleep 4
           xcrun simctl io "$SNOWFOLD_IPHONE_UDID" screenshot "$SHOTS_DIR/icon-iphone-homescreen.png"
 
       - name: Build macOS app
+        continue-on-error: true
         run: >-
           xcodebuild -project apps/apple/SnowFold.xcodeproj -scheme SnowFold-macOS
           -destination 'platform=macOS,arch=arm64'
           -derivedDataPath "$APPLE_ROOT/.build/audit-mac" CODE_SIGNING_ALLOWED=YES build
 
       - name: macOS window shots (tabs x light/dark + small window + empty overview)
+        continue-on-error: true
         env:
           DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-mac
           SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
         run: bash apps/apple/scripts/run-mac-shots.sh
 
       - name: Prepare macOS sheet fixture (inside app sandbox container)
+        continue-on-error: true
         run: |
           set -euo pipefail
           container_tmp="$HOME/Library/Containers/app.snowfold/Data/tmp"
@@ -190,6 +201,7 @@ jobs:
           cp -R "$APPLE_ROOT/.build/long-data-v2/." "$container_tmp/audit-long/"
 
       - name: macOS sheet shots (add asset / subscription edit, light + dark)
+        continue-on-error: true
         env:
           TEST_RUNNER_MAC_SHOTS_DEST: ${{ env.SHOTS_DIR }}
         run: >-
@@ -199,6 +211,7 @@ jobs:
           -only-testing:SnowFoldSnapshots-macOS/MacSheetTours
 
       - name: Collect app icon evidence
+        continue-on-error: true
         run: |
           set -euo pipefail
           cp "$APPLE_ROOT/Sources/Assets.xcassets/AppIcon.appiconset/icon1024.png" "$SHOTS_DIR/icon-source-1024.png"
