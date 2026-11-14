@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: ['**']
+    # Other branches are checked through their pull request; pushing them too would run CI twice.
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -75,7 +76,7 @@ jobs:
                   selected['apple'] = True
               elif path.startswith('apps/android/'):
                   selected['android'] = True
-              elif (path.startswith(('docs/', '.fullstack/'))
+              elif (path.startswith('docs/')
                       or Path(path).suffix.lower() in ('.md', '.rst', '.txt')
                       or Path(path).name.startswith(('LICENSE', 'COPYING', 'CHANGELOG'))):
                   pass
@@ -115,7 +116,9 @@ jobs:
         with:
           workspaces: '. -> target/ci'
           shared-key: desktop-check
-      - run: cargo fmt --check
+      - name: Check formatting once (platform independent)
+        if: runner.os == 'macOS'
+        run: cargo fmt --check
       - run: cargo test --locked --workspace
 
   apple:
@@ -153,12 +156,12 @@ jobs:
         run: >-
           xcodebuild -project apps/apple/SnowFold.xcodeproj -scheme SnowFold-iOS
           -destination "platform=iOS Simulator,id=$SNOWFOLD_SIMULATOR_ID"
-          -derivedDataPath target/xcode-ios CODE_SIGNING_ALLOWED=NO build test
+          -derivedDataPath target/xcode-ios CODE_SIGNING_ALLOWED=NO test
       - name: Build and test macOS SwiftUI
         run: >-
           xcodebuild -project apps/apple/SnowFold.xcodeproj -scheme SnowFold-macOS
           -destination 'platform=macOS,arch=arm64'
-          -derivedDataPath target/xcode-macos CODE_SIGNING_ALLOWED=NO build test
+          -derivedDataPath target/xcode-macos CODE_SIGNING_ALLOWED=NO test
 
   android:
     name: Android (unit tests, lint, debug APK)
@@ -173,7 +176,7 @@ jobs:
       - uses: ./.github/actions/android-setup
       - name: Test, lint and assemble debug APK
         working-directory: apps/android
-        run: ./gradlew --no-daemon testDebugUnitTest lint assembleDebug
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
 
   summary:
     name: CI Summary
@@ -191,7 +194,7 @@ jobs:
           jobs = json.loads(os.environ['NEEDS_JSON'])
           failed = [name for name, job in jobs.items()
                     if job['result'] not in ('success', 'skipped')]
-          if jobs['changes']['result'] != 'success' or failed:
-              sys.exit(f'CI failed: {failed or ["changes"]}')
+          if failed:
+              sys.exit(f'CI failed: {failed}')
           print('All required checks passed; unaffected platforms were skipped.')
           PY

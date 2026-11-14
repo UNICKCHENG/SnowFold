@@ -16,8 +16,6 @@ from urllib.request import Request, urlopen
 SIGNING_SECRETS = (
     'ANDROID_KEYSTORE_BASE64',
     'ANDROID_KEYSTORE_PASSWORD',
-    'ANDROID_KEY_ALIAS',
-    'ANDROID_KEY_PASSWORD',
 )
 
 
@@ -29,7 +27,7 @@ def validate():
     missing = [name for name in SIGNING_SECRETS if not os.environ.get(name)]
     if missing:
         raise SystemExit('Missing required Android signing secrets: ' + ', '.join(missing))
-    print(f'Tag {tag} matches workspace version; all four signing secrets are configured.')
+    print(f'Tag {tag} matches workspace version; both signing secrets are configured.')
 
 
 def decode_keystore():

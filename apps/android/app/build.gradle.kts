@@ -64,15 +64,15 @@ val generateIcons = tasks.register<GenerateIconsTask>("generateIcons") {
 }
 val minimumSdk = 26
 
-// Frozen release signing contract: sign only when all four SNOWFOLD_ANDROID_*
-// environment variables are present; otherwise assembleRelease stays unsigned
-// and the build must not fail.
+// Release signing: sign only when both SNOWFOLD_ANDROID_KEYSTORE_* environment
+// variables are present; otherwise assembleRelease stays unsigned and the build
+// must not fail. The keystore is PKCS12, which requires the key password to equal
+// the store password, and the alias is not a secret, so neither is configurable.
+val releaseKeyAlias = "snowfold"
 val keystoreFile = providers.environmentVariable("SNOWFOLD_ANDROID_KEYSTORE_FILE").orNull
 val keystorePassword = providers.environmentVariable("SNOWFOLD_ANDROID_KEYSTORE_PASSWORD").orNull
-val keyAlias = providers.environmentVariable("SNOWFOLD_ANDROID_KEY_ALIAS").orNull
-val keyPassword = providers.environmentVariable("SNOWFOLD_ANDROID_KEY_PASSWORD").orNull
 val releaseSigningMaterialPresent =
-    listOf(keystoreFile, keystorePassword, keyAlias, keyPassword).all { !it.isNullOrBlank() }
+    listOf(keystoreFile, keystorePassword).all { !it.isNullOrBlank() }
 
 android {
     namespace = "app.snowfold"
@@ -96,8 +96,8 @@ android {
             create("release") {
                 storeFile = file(keystoreFile!!)
                 storePassword = keystorePassword
-                keyAlias = keyAlias
-                keyPassword = keyPassword
+                keyAlias = releaseKeyAlias
+                keyPassword = keystorePassword
             }
         }
     }

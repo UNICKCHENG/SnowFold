@@ -208,6 +208,6 @@ Remove-Item Env:SNOWFOLD_DATA_DIR
 | `SnowFold-android.apk` | release 签名 APK |
 | `NOTICE.txt`、`SHA256SUMS` | 第三方声明；全部资产的校验和 |
 
-安卓签名从仓库 Settings → Secrets and variables → Actions → Repository secrets 读取 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`，缺任一个发版失败并报出缺哪个。iOS 只在 CI 中构建，不发布（需要苹果开发者账号签名）。
+安卓签名从仓库 Settings → Secrets and variables → Actions → Repository secrets 读取 `ANDROID_KEYSTORE_BASE64`（PKCS12 keystore 的 base64）和 `ANDROID_KEYSTORE_PASSWORD`，缺任一个发版失败并报出缺哪个。密钥别名固定为 `snowfold`，密钥密码与库密码相同（PKCS12 要求），生成方式：`keytool -genkeypair -keystore snowfold-release.p12 -storetype PKCS12 -alias snowfold -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=SnowFold"`。iOS 只在 CI 中构建，不发布（需要苹果开发者账号签名）。
 
 tag 构建直接发布为正式版（非草稿）；tag 含 `-` 时标为预发布。说明由 GitHub 自动生成（含 New Contributors），再追加本版与上个 tag 之间全部提交作者的贡献者名单。
