@@ -1,0 +1,112 @@
+name: SnowFold
+options:
+  minimumXcodeGenVersion: 2.46.0
+  developmentLanguage: zh-Hans
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: app.snowfold
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    SWIFT_VERSION: "6.0"
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_CFBundleDisplayName: SnowFold
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    OTHER_LDFLAGS: ["$(inherited)", "-lc++", "-liconv"]
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+targetTemplates:
+  SnowFoldApp:
+    type: application
+    sources:
+      - path: Sources
+      - path: Generated/Swift
+        includes: ["*.swift"]
+    dependencies:
+      - framework: Generated/SnowFoldCore.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_NAME: SnowFold
+targets:
+  SnowFold-iOS:
+    templates: [SnowFoldApp]
+    platform: iOS
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+  SnowFold-macOS:
+    templates: [SnowFoldApp]
+    platform: macOS
+    settings:
+      base:
+        ARCHS: arm64
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.finance
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: YES
+        CODE_SIGN_ENTITLEMENTS: SnowFold.entitlements
+  SnowFoldTests-iOS:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/SnowFoldTests
+    dependencies:
+      - target: SnowFold-iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.snowfold.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/SnowFold.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SnowFold"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  SnowFoldTests-macOS:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/SnowFoldTests
+    dependencies:
+      - target: SnowFold-macOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.snowfold.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/SnowFold.app/Contents/MacOS/SnowFold"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  SnowFoldSnapshots-iOS:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/SnowFoldSnapshots
+    dependencies:
+      - target: SnowFold-iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.snowfold.snapshots
+        TEST_TARGET_NAME: SnowFold-iOS
+schemes:
+  SnowFold-iOS:
+    build:
+      targets:
+        SnowFold-iOS: all
+    test:
+      targets:
+        - SnowFoldTests-iOS
+  SnowFold-macOS:
+    build:
+      targets:
+        SnowFold-macOS: all
+    test:
+      targets:
+        - SnowFoldTests-macOS
+  SnowFold-iOS-snapshots:
+    build:
+      targets:
+        SnowFold-iOS: all
+    test:
+      targets:
+        - SnowFoldSnapshots-iOS

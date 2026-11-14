@@ -1,0 +1,41 @@
+name: Android build prerequisites
+description: Validate the official Gradle Wrapper and prepare cached Java, Cargo and Android tools.
+runs:
+  using: composite
+  steps:
+    - name: Validate official Gradle Wrapper checksums
+      uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4 (peeled commit)
+    - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+      with:
+        distribution: temurin
+        java-version: '21'
+        cache: gradle
+        cache-dependency-path: |
+          apps/android/**/*.gradle.kts
+          apps/android/gradle.properties
+          apps/android/gradle/wrapper/gradle-wrapper.properties
+          apps/android/gradle/libs.versions.toml
+    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: '1.96.0'
+        targets: aarch64-linux-android,x86_64-linux-android
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2 (peeled commit)
+      with:
+        workspaces: '. -> target/ci'
+        shared-key: android
+    - name: Install Cargo NDK
+      shell: bash
+      run: cargo install cargo-ndk --locked --version 4.1.2
+    - name: Install the SDK and NDK selected by the Android application
+      shell: bash
+      run: |
+        python3 - <<'PY'
+        import os, re, subprocess
+        from pathlib import Path
+        source = Path('apps/android/app/build.gradle.kts').read_text()
+        sdk = re.search(r'compileSdk\s*=\s*(\d+)', source).group(1)
+        ndk = re.search(r'ndkVersion\s*=\s*"([^"]+)"', source).group(1)
+        manager = str(Path(os.environ['ANDROID_HOME']) / 'cmdline-tools/latest/bin/sdkmanager')
+        # GitHub-hosted runners already accept the Android SDK licenses.
+        subprocess.run([manager, '--install', f'platforms;android-{sdk}', f'ndk;{ndk}'], check=True)
+        PY

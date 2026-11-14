@@ -1,0 +1,9 @@
+[bindings.swift]
+module_name = "SnowFoldCore"
+ffi_module_name = "SnowFoldCoreFFI"
+cdylib_name = "snowfold_core"
+generate_module_map = true
+
+[bindings.kotlin]
+package_name = "app.snowfold.core"
+cdylib_name = "snowfold_core"

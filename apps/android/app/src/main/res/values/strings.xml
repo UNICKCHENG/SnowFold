@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copy keys and wording follow docs/copy.md and the frozen corrections in the
+     fact sheet; screen-reader labels (cd_*) are new accessibility-only strings. -->
+<resources>
+    <string name="app_name">SnowFold</string>
+
+    <!-- 页面、分区与统计 -->
+    <string name="overview_title">总览</string>
+    <string name="assets_tab">资产</string>
+    <string name="assets_title">资产与负债</string>
+    <string name="subscriptions_title">订阅</string>
+    <string name="settings_title">设置</string>
+    <string name="new_subscription_title">新建订阅</string>
+    <string name="overview_subtitle">%1$s 星期%2$s · 数据已保存在本机</string>
+    <string name="assets_subtitle">%1$d 项记录 · 5 个固定分类</string>
+    <string name="subscriptions_subtitle">%1$d 个在订</string>
+    <string name="subscriptions_subtitle_with_paused">%1$d 个在订 · %2$d 个已暂停</string>
+    <string name="net_assets">净资产</string>
+    <string name="total_assets">总资产</string>
+    <string name="total_debt">总负债</string>
+    <string name="debt_ratio">负债率</string>
+    <string name="asset_composition">资产构成</string>
+    <string name="all_details">全部明细</string>
+    <string name="upcoming_charges">即将扣费</string>
+    <string name="all_subscriptions">全部订阅</string>
+    <string name="due_this_month">本月待扣</string>
+    <string name="monthly_spending">月均支出</string>
+    <string name="annual_spending">年化支出</string>
+    <string name="annual_spending_help">按扣费周期折算为全年支出</string>
+    <string name="due_this_month_help">在用订阅中，下次扣费日落在当前自然月的金额合计（含本月已过期、待确认的）</string>
+    <string name="monthly_spending_help">按各订阅的扣费周期折算到每月的平均支出</string>
+    <string name="next_charge">下一个扣费</string>
+    <string name="subscription_summary">%1$d 个订阅</string>
+    <string name="subscription_summary_overdue">%1$d 个订阅 · %2$d 笔待确认</string>
+    <string name="subscription_summary_next">%1$d 个订阅 · 下一笔 %2$s</string>
+    <string name="item_count">%1$d 项</string>
+
+    <!-- 外观主题沿用桌面观察习惯的描述；文案以冻结表为准 -->
+    <string name="appearance_section">外观</string>
+    <string name="data_section">数据</string>
+    <string name="encrypted_backup_section">加密备份</string>
+    <string name="about_section">关于</string>
+    <string name="app_version">SnowFold · MVP 0.1</string>
+    <string name="offline_description">离线运行 · 无网络请求</string>
+
+    <string name="category_cash">流动资金</string>
+    <string name="category_fixed">固定资产</string>
+    <string name="category_investment">投资理财</string>
+    <string name="category_receivable">应收款</string>
+    <string name="category_debt">负债</string>
+
+    <!-- 字段、选项与日期 -->
+    <string name="name_label">名称</string>
+    <string name="amount_label">金额</string>
+    <string name="currency_label">币种</string>
+    <string name="billing_cycle_label">扣费周期</string>
+    <string name="next_charge_date_label">下次扣费日</string>
+    <string name="currency_cny">¥ 人民币</string>
+    <string name="currency_usd">$ 美元</string>
+    <string name="cycle_weekly">每周</string>
+    <string name="cycle_monthly">每月</string>
+    <string name="cycle_quarterly">每季</string>
+    <string name="cycle_yearly">每年</string>
+    <string name="cycle_unknown">未知周期</string>
+    <string name="group_overdue">待确认</string>
+    <string name="group_this_month">本月</string>
+    <string name="group_next_month">下月</string>
+    <string name="group_later">之后</string>
+    <string name="group_paused">已暂停</string>
+    <string name="theme_label">主题</string>
+    <string name="theme_system">自动</string>
+    <string name="theme_light">浅色</string>
+    <string name="theme_dark">深色</string>
+    <string name="date_long">%1$d年%2$d月%3$d日</string>
+    <string name="date_short">%1$d月%2$d日</string>
+    <string name="month_title">%1$d年%2$d月</string>
+    <string name="weekday_sunday">日</string>
+    <string name="weekday_monday">一</string>
+    <string name="weekday_tuesday">二</string>
+    <string name="weekday_wednesday">三</string>
+    <string name="weekday_thursday">四</string>
+    <string name="weekday_friday">五</string>
+    <string name="weekday_saturday">六</string>
+    <string name="today">今天</string>
+    <string name="days_until_charge">%1$d 天后</string>
+    <string name="overdue_days">逾期 %1$d 天</string>
+    <string name="overdue_days_compact">逾期%1$d天</string>
+    <string name="history_title">变动记录 · 修正不会新增快照</string>
+    <string name="history_count_inline">变动 %1$d 条</string>
+    <string name="history_current">当前</string>
+    <string name="history_initial">初始</string>
+    <string name="new_subscription_help">名称与金额必填。保存后按周期计算下次扣费；到期时进入「待确认」，点一下即可顺延。</string>
+
+    <!-- 按钮 -->
+    <string name="done">完成</string>
+    <string name="cancel">取消</string>
+    <string name="save">保存</string>
+    <string name="close">关闭</string>
+    <string name="add">添加</string>
+    <string name="add_with_icon">＋ 添加</string>
+    <string name="new_subscription">＋ 新建订阅</string>
+    <string name="correct_history">修正</string>
+    <string name="apply_date">应用日期</string>
+    <string name="mark_renewed">✓ 已续费</string>
+    <string name="pause">暂停</string>
+    <string name="resume">恢复</string>
+    <string name="undo">撤销 · 6秒内</string>
+    <string name="export">导出</string>
+    <string name="action_import">导入</string>
+    <string name="clear">清空</string>
+    <string name="export_sealed">导出密文</string>
+    <string name="import_sealed">导入密文</string>
+    <string name="export_recovery_code">导出恢复码</string>
+    <string name="import_recovery_code">导入恢复码</string>
+    <string name="confirm_overwrite">确认覆盖</string>
+    <string name="confirm_replace_key">确认替换</string>
+
+    <!-- 空状态与设置说明 -->
+    <string name="no_asset_records">还没有记录，点击右侧「添加」记下第一笔</string>
+    <string name="composition_empty">暂无资产</string>
+    <string name="no_subscriptions">还没有订阅</string>
+    <string name="no_subscriptions_help">记下常用服务，随时知道接下来要扣多少钱</string>
+    <string name="no_charges">暂无扣费</string>
+    <string name="no_upcoming_charges">未来 30 天没有待扣费用</string>
+    <string name="theme_help">跟随系统会自动匹配电脑的深浅色。</string>
+    <string name="export_backup_title">导出备份</string>
+    <string name="export_backup_help">保存为 JSON 文件，可随时导入恢复。</string>
+    <string name="import_backup_title">导入备份</string>
+    <string name="import_backup_help">会覆盖当前所有记录，请先导出备份。</string>
+    <string name="clear_all_title">清空全部数据</string>
+    <string name="clear_all_help">删除本机上的全部资产与订阅记录。</string>
+    <string name="encrypted_backup_help">导出 .sfseal 密文，可安全上传网盘或发给家人。</string>
+    <string name="restore_encrypted_backup_title">恢复加密备份</string>
+    <string name="restore_encrypted_backup_help">导入密文并覆盖当前数据；需要本机同步密钥。</string>
+    <string name="key_fingerprint_label">同步密钥指纹</string>
+    <string name="key_not_generated">尚未生成</string>
+    <string name="recovery_code_title">同步密钥恢复码</string>
+    <string name="recovery_code_help">换机或重装后恢复加密备份；请离线保存，不要放云盘同步目录。</string>
+
+    <!-- 确认弹层 -->
+    <string name="clear_confirmation_title">清空全部数据？</string>
+    <string name="clear_confirmation_body">将删除全部资产、历史与订阅，不能撤销。请先导出备份。</string>
+    <string name="import_confirmation_title">覆盖本机数据？</string>
+    <string name="import_confirmation_body">将导入 %1$s 项资产、%2$s 条历史、%3$s 项订阅，并覆盖现有数据。此操作不能撤销。</string>
+    <string name="sealed_import_confirmation_body">加密备份导出于 %1$s（设备 %2$s），校验通过：%3$s 项资产、%4$s 条历史、%5$s 项订阅。\n确认后会覆盖现有数据，此操作不能撤销；如果导出时间比当前数据旧，请先取消并核对。</string>
+    <string name="replace_key_confirmation_title">替换本机同步密钥？</string>
+    <string name="replace_key_confirmation_body">当前指纹 %1$s，新指纹 %2$s。\n替换后，旧密钥导出的加密备份将无法在本机打开；旧密钥会备份为 snowfold-sync.key.bak。只有确认这个恢复码来自你自己的设备时才继续。</string>
+
+    <!-- 操作反馈 -->
+    <string name="balance_change_recorded">已记录本次变动</string>
+    <string name="asset_deleted">已删除资产</string>
+    <string name="subscription_deleted">已删除订阅</string>
+    <string name="data_updated">数据已更新</string>
+    <string name="backup_exported">备份已导出</string>
+    <string name="sealed_backup_exported">加密备份已导出 · 密钥指纹 %1$s</string>
+    <string name="recovery_code_exported">恢复码已导出 · 密钥指纹 %1$s</string>
+    <string name="key_imported">同步密钥已导入 · 指纹 %1$s</string>
+    <string name="key_replaced">同步密钥已替换 · 指纹 %1$s（旧密钥已备份为 .bak）</string>
+    <string name="subscription_renewed">已顺延 %1$s 期</string>
+    <string name="startup_backup_failed">启动备份失败：%1$s。原数据未改变，请检查数据目录权限。</string>
+    <string name="startup_key_unavailable">同步密钥不可用：%1$s。加密备份暂时无法导出或导入；可以在设置里导入恢复码，或处理密钥文件后重启。</string>
+    <string name="local_data_unreadable">无法读取本机数据：%1$s。请检查数据目录权限后重新打开。</string>
+    <string name="operation_failed">操作失败：%1$s。请检查输入或数据目录后重试。</string>
+    <string name="theme_not_saved">主题未保存：%1$s</string>
+    <string name="choose_next_charge_date">请选择下次扣费日</string>
+    <string name="choose_date">请选择日期</string>
+    <string name="saved_but_reload_failed">已保存，但读取失败：%1$s</string>
+    <string name="not_saved">未保存：%1$s</string>
+    <string name="nothing_to_undo">没有可撤销的操作</string>
+    <string name="undo_expired">撤销已过期</string>
+    <string name="recovery_code_unreadable">恢复码内容无法解析，本机密钥未改变</string>
+    <string name="key_changed_elsewhere">本机同步密钥已被其他窗口修改，请重新导入恢复码</string>
+    <string name="export_failed">导出失败：%1$s</string>
+    <string name="import_failed_unchanged">导入失败，原数据未改变：%1$s</string>
+    <string name="sealed_export_failed">加密备份导出失败：%1$s</string>
+    <string name="key_unreadable_import_aborted">无法读取同步密钥，加密备份未导入：%1$s</string>
+    <string name="sealed_import_failed_unchanged">加密备份导入失败，原数据未改变：%1$s</string>
+    <string name="recovery_export_failed">恢复码导出失败：%1$s</string>
+    <string name="recovery_import_failed">恢复码导入失败：%1$s</string>
+    <string name="recovery_import_failed_unchanged">恢复码导入失败，本机密钥未改变：%1$s</string>
+    <string name="asset_total_overflow">金额合计超出整数范围，请检查资产数据</string>
+    <string name="out_of_range">超出范围</string>
+    <string name="total_out_of_range">合计超出范围</string>
+    <string name="statistics_error">统计错误：%1$s</string>
+    <string name="statistics_failed">统计失败：%1$s</string>
+    <string name="renewal_not_due">下次扣费日尚未到达，无需顺延</string>
+
+    <!-- FFI 错误描述（宿主按错误枚举映射，不用 Rust Display） -->
+    <string name="error_validation">请检查名称、金额、日期与选项</string>
+    <string name="error_not_found">记录不存在，请刷新后重试</string>
+    <string name="error_conflict">数据已变化或正在使用，请刷新后重试</string>
+    <string name="error_authentication">无法解密：同步密钥不匹配或文件已损坏</string>
+    <string name="error_incompatible_backup">不支持的备份版本或加密格式</string>
+    <string name="error_invalid_backup">备份内容不完整或不合法，原数据未改变</string>
+    <string name="error_invalid_recovery_code">恢复码不合法，本机密钥未改变</string>
+    <string name="error_key_unavailable">同步密钥不可用，请检查密钥文件或导入恢复码</string>
+    <string name="error_io">无法读写文件，请检查目录与权限</string>
+    <string name="error_database">无法读写本机数据库</string>
+    <string name="error_incompatible_database">数据库版本不兼容，原文件未改动</string>
+    <string name="error_overflow">金额合计超出整数范围，请检查数据</string>
+    <string name="error_internal">核心状态不可用，请重新打开</string>
+
+    <!-- 无障碍标签（新增，界面功能不变） -->
+    <string name="cd_settings">打开设置</string>
+    <string name="cd_rename">重命名</string>
+    <string name="amount_other_currency">另有 %1$s</string>
+    <string name="current_balance_note">当前余额 %1$s</string>
+    <string name="balance_undo_note">变动会记入历史，保存后 6 秒内可撤销</string>
+    <string name="status_label">状态</string>
+    <string name="status_active">在订</string>
+    <string name="status_paused">已暂停</string>
+    <string name="paused_badge">已暂停</string>
+    <string name="cd_delete_asset">删除资产</string>
+    <string name="cd_delete_subscription">删除订阅</string>
+    <string name="cd_stats_info">查看统计口径说明</string>
+    <string name="cd_previous_month">上个月</string>
+    <string name="cd_next_month">下个月</string>
+    <string name="cd_pick_date">选择日期</string>
+    <string name="cd_back">返回</string>
+    <string name="assets_pane_hint">在左侧选择一项资产，查看变动记录与编辑</string>
+    <string name="subs_pane_hint">在左侧选择一项订阅，查看与编辑</string>
+    <string name="annual_chart_title">年化支出</string>
+    <string name="annual_chart_empty">暂无扣费</string>
+    <string name="corrections_toggle">修正记录</string>
+    <string name="corrections_empty">没有修正记录</string>
+    <string name="annual_chart_cny">¥ 人民币年化</string>
+    <string name="annual_chart_usd">$ 美元年化</string>
+    <string name="next_section">接下来</string>
+    <string name="next_payment">下一笔</string>
+    <string name="category_count">%1$d 类</string>
+    <string name="timeline_description">未来 30 天 · 每个标记是一笔扣费</string>
+    <string name="group_upcoming">即将扣费</string>
+    <string name="pause_count">已暂停（%1$d）</string>
+    <string name="add_category">＋ 添加%1$s</string>
+    <string name="adjust_balance">调整余额</string>
+    <string name="history_updated">历史 %1$d 条 · 更新于 %2$s</string>
+    <string name="subscription_detail_title">订阅详情</string>
+    <string name="new_asset_title">新建资产</string>
+    <string name="backups_section">备份</string>
+    <string name="key_section">同步密钥</string>
+    <string name="data_location_title">数据位置</string>
+    <string name="data_location_value">本机数据库文件</string>
+    <string name="correction_sheet_title">修正这条记录</string>
+    <string name="sheet_expand">展开</string>
+    <string name="sheet_collapse">收起</string>
+    <string name="menu_rename">重命名</string>
+    <string name="menu_delete">删除</string>
+    <string name="local_data_title">无法读取本机数据</string>
+    <string name="menu_edit">编辑</string>
+</resources>
