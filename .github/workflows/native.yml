@@ -146,16 +146,17 @@ jobs:
                      if device["name"].startswith("iPhone")))')
           xcrun simctl bootstatus "$simulator" -b
           echo "SNOWFOLD_SIMULATOR_ID=$simulator" >> "$GITHUB_ENV"
+      # 钥匙串测试需要带权限文件的临时签名（"-"），不签名时系统返回 -34018。
       - name: Build and test iOS Simulator
         run: >-
           xcodebuild -project apps/apple/SnowFold.xcodeproj -scheme SnowFold-iOS
           -destination "platform=iOS Simulator,id=$SNOWFOLD_SIMULATOR_ID"
-          -derivedDataPath target/xcode-ios CODE_SIGNING_ALLOWED=NO test
+          -derivedDataPath target/xcode-ios CODE_SIGNING_ALLOWED=YES test
       - name: Build and test macOS SwiftUI
         run: >-
           xcodebuild -project apps/apple/SnowFold.xcodeproj -scheme SnowFold-macOS
           -destination 'platform=macOS,arch=arm64'
-          -derivedDataPath target/xcode-macos CODE_SIGNING_ALLOWED=NO test
+          -derivedDataPath target/xcode-macos CODE_SIGNING_ALLOWED=YES test
 
   android:
     name: Android (unit tests, lint, debug APK)
