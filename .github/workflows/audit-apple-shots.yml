@@ -60,7 +60,10 @@ jobs:
           set -euo pipefail
           mkdir -p "$APPLE_ROOT/.build/seed-link"
           cp "$CARGO_TARGET_DIR/aarch64-apple-darwin/release/libsnowfold_core.a" "$APPLE_ROOT/.build/seed-link/"
-          swiftc -O -I "$APPLE_ROOT/Generated/Headers" -L "$APPLE_ROOT/.build/seed-link" \
+          # build-core.sh 只把头文件与 module.modulemap 打进 xcframework，取 macOS 切片的 Headers
+          FFI_HEADERS="$(dirname "$(find "$APPLE_ROOT/Generated/SnowFoldCore.xcframework" -path '*macos*' -name module.modulemap | head -1)")"
+          test -f "$FFI_HEADERS/module.modulemap"
+          swiftc -O -I "$FFI_HEADERS" -L "$APPLE_ROOT/.build/seed-link" \
             -lsnowfold_core -lc++ -liconv \
             -o "$APPLE_ROOT/.build/sample-seed" \
             "$APPLE_ROOT/scripts/seed/main.swift" \
