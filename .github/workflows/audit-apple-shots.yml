@@ -1,0 +1,215 @@
+# 审计专用：四端界面重做第一步的苹果端截图流水线（只在 audit/apple-shots 分支存在）。
+# 一次运行拍全：iPhone（393×852）与 iPad（1180×820）巡游（空库/长数据 × 浅色/深色 + iPhone 动态字体最大档），
+# macOS 四页签窗口截图与添加资产/订阅编辑弹层（浅深两遍），外加主屏图标证据。
+name: Apple shots audit
+
+on:
+  push:
+    branches: [audit/apple-shots]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-apple-shots-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target/audit
+  CARGO_TERM_COLOR: always
+  APPLE_ROOT: ${{ github.workspace }}/apps/apple
+  SHOTS_DIR: ${{ github.workspace }}/.fullstack/audit/apple/shots
+
+jobs:
+  shots:
+    name: iPhone / iPad tours + macOS shots
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.96.0'
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2 (peeled commit)
+        with:
+          workspaces: '. -> target/audit'
+          shared-key: apple-audit-shots
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Record runner environment
+        run: |
+          mkdir -p "$SHOTS_DIR"
+          {
+            echo "macOS: $(sw_vers --productVersion) ($(sw_vers --buildVersion))"
+            xcodebuild -version
+            echo "iOS runtimes:"
+            xcrun simctl list runtimes -j | python3 -c 'import json,sys; [print("  ", r["identifier"], r["version"]) for r in json.load(sys.stdin)["runtimes"]]'
+          } | tee "$SHOTS_DIR/runner-env.txt"
+
+      - name: Build core (three slices) and generate Xcode project
+        run: bash apps/apple/scripts/build-core.sh
+
+      - name: Build sample-seed and prepare long fixture
+        run: |
+          set -euo pipefail
+          mkdir -p "$APPLE_ROOT/.build/seed-link"
+          cp "$CARGO_TARGET_DIR/aarch64-apple-darwin/release/libsnowfold_core.a" "$APPLE_ROOT/.build/seed-link/"
+          swiftc -O -I "$APPLE_ROOT/Generated/Headers" -L "$APPLE_ROOT/.build/seed-link" \
+            -lsnowfold_core -lc++ -liconv \
+            -o "$APPLE_ROOT/.build/sample-seed" \
+            "$APPLE_ROOT/scripts/seed/main.swift" \
+            "$APPLE_ROOT/Generated/Swift/SnowFoldCore.swift" \
+            "$APPLE_ROOT/Sources/Core/KeychainKeyStore.swift"
+          "$APPLE_ROOT/.build/sample-seed" "$APPLE_ROOT/.build/long-data-v2"
+
+      - name: Create snowfold-apple simulators (iPhone 393x852pt, iPad 1180x820pt)
+        run: |
+          set -euo pipefail
+          cat > /tmp/pick_devicetype.py <<'PY'
+          import json, sys
+          names = {t["name"] for t in json.load(sys.stdin)["devicetypes"]}
+          for candidate in sys.argv[1:]:
+              if candidate in names:
+                  print(candidate)
+                  break
+          PY
+          cat > /tmp/pick_runtime.py <<'PY'
+          import json, sys
+          runtimes = [r for r in json.load(sys.stdin)["runtimes"]
+                      if r.get("platform") == "iOS" and r.get("isAvailable", True)]
+          print(max(runtimes, key=lambda r: tuple(int(p) for p in r["version"].split(".")))["identifier"])
+          PY
+          cat > /tmp/pick_udid.py <<'PY'
+          import json, sys
+          target = sys.argv[1]
+          devices = [d for rows in json.load(sys.stdin)["devices"].values() for d in rows]
+          for device in devices:
+              if device["name"] == target:
+                  print(device["udid"])
+                  break
+          PY
+          runtime=$(xcrun simctl list runtimes -j | python3 /tmp/pick_runtime.py)
+          iphone_type=$(xcrun simctl list devicetypes -j | python3 /tmp/pick_devicetype.py \
+            "iPhone 16" "iPhone 17" "iPhone 16 Pro" "iPhone 17 Pro" "iPhone 15")
+          ipad_type=$(xcrun simctl list devicetypes -j | python3 /tmp/pick_devicetype.py \
+            "iPad Air 11-inch (M3)" "iPad Air 11-inch (M2)" "iPad Air (5th generation)" "iPad Air" "iPad")
+          echo "机型：$iphone_type / $ipad_type（runtime $runtime）"
+          xcrun simctl delete snowfold-apple-iphone 2>/dev/null || true
+          xcrun simctl delete snowfold-apple-ipad 2>/dev/null || true
+          xcrun simctl create snowfold-apple-iphone "$iphone_type" "$runtime"
+          xcrun simctl create snowfold-apple-ipad "$ipad_type" "$runtime"
+          iphone_udid=$(xcrun simctl list devices -j | python3 /tmp/pick_udid.py snowfold-apple-iphone)
+          ipad_udid=$(xcrun simctl list devices -j | python3 /tmp/pick_udid.py snowfold-apple-ipad)
+          xcrun simctl bootstatus "$iphone_udid" -b
+          xcrun simctl bootstatus "$ipad_udid" -b
+          xcrun simctl status_bar "$iphone_udid" override --time "9:41" --batteryLevel 100 --batteryState charged --wifiBars 3
+          xcrun simctl status_bar "$ipad_udid" override --time "9:41" --batteryLevel 100 --batteryState charged --wifiBars 3
+          echo "SNOWFOLD_IPHONE_UDID=$iphone_udid" >> "$GITHUB_ENV"
+          echo "SNOWFOLD_IPAD_UDID=$ipad_udid" >> "$GITHUB_ENV"
+
+      - name: Build iOS app and tour UI tests (build-for-testing)
+        run: >-
+          xcodebuild -project apps/apple/SnowFold.xcodeproj -scheme SnowFold-iOS-snapshots
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$APPLE_ROOT/.build/audit-ios" CODE_SIGNING_ALLOWED=YES build-for-testing
+
+      - name: iPhone tour - empty light
+        env:
+          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
+          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
+        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 empty light
+
+      - name: iPhone tour - long light
+        env:
+          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
+          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
+        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 long light
+
+      - name: iPhone tour - long dark
+        env:
+          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
+          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
+        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 long dark
+
+      - name: iPhone tour - empty light (dynamic type AXXXL)
+        env:
+          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
+          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
+        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 empty light ax
+
+      - name: iPad tour - empty light
+        env:
+          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
+          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
+        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPAD_UDID" ipad empty light
+
+      - name: iPad tour - long light
+        env:
+          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
+          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
+        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPAD_UDID" ipad long light
+
+      - name: iPad tour - long dark
+        env:
+          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-ios
+          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
+        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPAD_UDID" ipad long dark
+
+      - name: iPhone home screen icon shot
+        run: |
+          xcrun simctl terminate "$SNOWFOLD_IPHONE_UDID" app.snowfold 2>/dev/null || true
+          sleep 4
+          xcrun simctl io "$SNOWFOLD_IPHONE_UDID" screenshot "$SHOTS_DIR/icon-iphone-homescreen.png"
+
+      - name: Build macOS app
+        run: >-
+          xcodebuild -project apps/apple/SnowFold.xcodeproj -scheme SnowFold-macOS
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$APPLE_ROOT/.build/audit-mac" CODE_SIGNING_ALLOWED=YES build
+
+      - name: macOS window shots (tabs x light/dark + small window + empty overview)
+        env:
+          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/audit-mac
+          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
+        run: bash apps/apple/scripts/run-mac-shots.sh
+
+      - name: Prepare macOS sheet fixture (inside app sandbox container)
+        run: |
+          set -euo pipefail
+          container_tmp="$HOME/Library/Containers/app.snowfold/Data/tmp"
+          mkdir -p "$container_tmp/audit-long" "$container_tmp/audit-empty"
+          cp -R "$APPLE_ROOT/.build/long-data-v2/." "$container_tmp/audit-long/"
+
+      - name: macOS sheet shots (add asset / subscription edit, light + dark)
+        env:
+          TEST_RUNNER_MAC_SHOTS_DEST: ${{ env.SHOTS_DIR }}
+        run: >-
+          xcodebuild -project apps/apple/SnowFold.xcodeproj -scheme SnowFold-macOS-snapshots
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$APPLE_ROOT/.build/audit-mac" CODE_SIGNING_ALLOWED=YES test
+          -only-testing:SnowFoldSnapshots-macOS/MacSheetTours
+
+      - name: Collect app icon evidence
+        run: |
+          set -euo pipefail
+          cp "$APPLE_ROOT/Sources/Assets.xcassets/AppIcon.appiconset/icon1024.png" "$SHOTS_DIR/icon-source-1024.png"
+          sips -s format png "$APPLE_ROOT/.build/audit-mac/Build/Products/Debug/SnowFold.app/Contents/Resources/AppIcon.icns" \
+            --out "$SHOTS_DIR/icon-mac-appicns.png"
+          ls -la "$SHOTS_DIR"
+
+      - name: Upload shots artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: audit-apple-shots
+          path: |
+            .fullstack/audit/apple/shots
+            apps/apple/.build/*.log
+          if-no-files-found: warn
+          retention-days: 14
