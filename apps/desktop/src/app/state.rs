@@ -86,8 +86,19 @@ impl SnowFold {
     ) -> Self {
         let focus = cx.focus_handle();
         focus.focus(window);
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder("名称"));
-        let amount = cx.new(|cx| InputState::new(window, cx).placeholder("0.00"));
+        // 单行 Enter 可能继续进入文本插入；在输入边界拒绝 CR/LF。
+        let single_line =
+            |text: &str, _: &mut gpui::Context<InputState>| !text.contains(['\r', '\n']);
+        let name = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("名称")
+                .validate(single_line)
+        });
+        let amount = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("0.00")
+                .validate(single_line)
+        });
         let date = cx.new(|cx| DatePickerState::new(window, cx));
         date.update(cx, |d, cx| d.set_date(today(), window, cx));
         let input_events = [name.clone(), amount.clone()]

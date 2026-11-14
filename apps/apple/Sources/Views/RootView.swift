@@ -80,14 +80,39 @@ extension View {
     func settingsToolbar<Actions: View>(@ViewBuilder actions: () -> Actions) -> some View {
         toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                #if os(macOS)
-                SettingsLink { Label(Copy.settingsTitle, systemImage: "slider.horizontal.3") }
-                #else
-                SettingsSheetButton()
-                #endif
+                SettingsToolbarEntry()
                 actions()
             }
         }
+    }
+}
+
+/// docs/mobile-layout.md §8：宽屏（iPad 常规宽度、Mac）设置只从侧边栏左下角进入；
+/// 手机与 iPad 分屏变窄（无侧边栏）保留右上角入口。Mac 用「设置」菜单（⌘,）。
+/// 注意：split 列表列在 iPad 全宽下按列宽（320pt）报 compact，因此该开关
+/// 由窗口根容器按窗口级 size class 统一注入，列内不自行判断。
+private struct ShowsSettingsToolbarKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var showsSettingsToolbar: Bool {
+        get { self[ShowsSettingsToolbarKey.self] }
+        set { self[ShowsSettingsToolbarKey.self] = newValue }
+    }
+}
+
+private struct SettingsToolbarEntry: View {
+    @Environment(\.showsSettingsToolbar) private var shows
+
+    var body: some View {
+        #if os(macOS)
+        EmptyView()
+        #else
+        if shows {
+            SettingsSheetButton()
+        }
+        #endif
     }
 }
 
@@ -112,6 +137,7 @@ struct RootView: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         Group {
@@ -175,6 +201,8 @@ struct RootView: View {
         )) {
             settingsSheet
         }
+        // 手机单列窗口级 compact：右上角设置入口照旧。
+        .environment(\.showsSettingsToolbar, sizeClass == .compact)
     }
 
     private var settingsSheet: some View {
@@ -209,6 +237,7 @@ struct SplitRootView: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var newAssetCategory: String?
     @State private var selectedAssetID: String?
     @State private var selectedSubscription: SubscriptionRecord?
@@ -242,6 +271,9 @@ struct SplitRootView: View {
                 if phase == .active { Task { await store.refreshIfReady() } }
             }
             .preferredColorScheme(store.theme.colorScheme)
+            // 窗口级判断：iPad 分屏变窄（无侧边栏）时恢复右上角设置；列表列的
+            // 列内 compact 不参与，宽屏各工具条一律无设置按钮。
+            .environment(\.showsSettingsToolbar, sizeClass == .compact)
     }
 
     @ViewBuilder
@@ -272,21 +304,77 @@ struct SplitRootView: View {
     }
 
     private var sidebar: some View {
-        List(selection: Binding<Router.Tab?>(
-            get: { router.tab }, set: { if let tab = $0 { router.tab = tab } }
-        )) {
-            Label("总览", systemImage: "chart.pie.fill").tag(Router.Tab.overview)
-                .accessibilityIdentifier("nav-overview")
-            Label(Copy.assetsTitle, systemImage: "creditcard.fill").tag(Router.Tab.assets)
-                .accessibilityIdentifier("nav-assets")
-            Label(Copy.subscriptionsTitle, systemImage: "calendar.badge.clock").tag(Router.Tab.subscriptions)
-                .accessibilityIdentifier("nav-subscriptions")
-            Label(Copy.settingsTitle, systemImage: "slider.horizontal.3").tag(Router.Tab.settings)
-                .accessibilityIdentifier("nav-settings")
+        // docs/mobile-layout.md §8：「设置」固定在侧边栏左下角，与上面三项之间只有留白。
+        // 上列为 List（原生选中样式）贪占剩余高度；设置行为自定义行，贴在底部
+        // （安全区之上再留 16pt）。选中样式：iPad 品牌蓝实底白字，Mac 系统灰底。
+        VStack(spacing: 0) {
+            List(selection: Binding<Router.Tab?>(
+                get: { router.tab == .settings ? nil : router.tab },
+                set: { if let tab = $0 { router.tab = tab } }
+            )) {
+                Label("总览", systemImage: "chart.pie.fill").tag(Router.Tab.overview)
+                    .accessibilityIdentifier("nav-overview")
+                Label(Copy.assetsTitle, systemImage: "creditcard.fill").tag(Router.Tab.assets)
+                    .accessibilityIdentifier("nav-assets")
+                Label(Copy.subscriptionsTitle, systemImage: "calendar.badge.clock").tag(Router.Tab.subscriptions)
+                    .accessibilityIdentifier("nav-subscriptions")
+            }
+            .listStyle(.sidebar)
+            settingsRow
         }
-        .listStyle(.sidebar)
         .navigationTitle("SnowFold")
         .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 220)
+    }
+
+    // 与系统侧边栏行的图标-文字间距一致（iPad 选中条为胶囊形）。
+    #if os(macOS)
+    private static let settingsIconSpacing: CGFloat = 10
+    #else
+    private static let settingsIconSpacing: CGFloat = 14
+    #endif
+
+    /// 左下角固定的「设置」入口：贴底、无分隔线、命中区不小于 44pt。
+    private var settingsRow: some View {
+        let selected = router.tab == .settings
+        return Button {
+            router.tab = .settings
+        } label: {
+            HStack(spacing: Self.settingsIconSpacing) {
+                #if os(macOS)
+                Image(systemName: "slider.horizontal.3")
+                    .foregroundStyle(Color.primary)
+                Text(Copy.settingsTitle)
+                    .foregroundStyle(Color.primary)
+                #else
+                Image(systemName: "slider.horizontal.3")
+                    .foregroundStyle(selected ? Color.white : Color.accentBrand)
+                Text(Copy.settingsTitle)
+                    .foregroundStyle(selected ? Color.white : Color.primary)
+                #endif
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(.horizontal, 15)
+            .padding(.vertical, 4)
+            #if os(macOS)
+            .background(
+                selected ? AnyShapeStyle(Color.primary.opacity(0.1)) : AnyShapeStyle(.clear),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+            #else
+            .background(
+                selected ? AnyShapeStyle(Color.accentBrand) : AnyShapeStyle(.clear),
+                in: Capsule(style: .continuous)
+            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+            #endif
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("nav-settings")
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
     @ViewBuilder

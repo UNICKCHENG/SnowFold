@@ -36,6 +36,12 @@ runs:
         sdk = re.search(r'compileSdk\s*=\s*(\d+)', source).group(1)
         ndk = re.search(r'ndkVersion\s*=\s*"([^"]+)"', source).group(1)
         manager = str(Path(os.environ['ANDROID_HOME']) / 'cmdline-tools/latest/bin/sdkmanager')
+        # Newer SDK releases name the platform package "android-37.0" instead of "android-37".
+        listing = subprocess.run([manager, '--list'], check=True, capture_output=True, text=True).stdout
+        available = {line.split('|')[0].strip() for line in listing.splitlines() if '|' in line}
+        platform = next((p for p in (f'platforms;android-{sdk}', f'platforms;android-{sdk}.0') if p in available), None)
+        if platform is None:
+            raise SystemExit(f'No SDK platform package found for compileSdk {sdk}')
         # GitHub-hosted runners already accept the Android SDK licenses.
-        subprocess.run([manager, '--install', f'platforms;android-{sdk}', f'ndk;{ndk}'], check=True)
+        subprocess.run([manager, '--install', platform, f'ndk;{ndk}'], check=True)
         PY

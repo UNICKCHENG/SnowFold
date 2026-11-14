@@ -345,7 +345,7 @@ fn native_input_navigation_crud_and_settings_events(cx: &mut TestAppContext) {
         assert_eq!(v.data.history.len(), 1);
     });
     click(cx, "¥100.00");
-    cx.simulate_keystrokes("cmd-a");
+    cx.simulate_keystrokes("secondary-a");
     cx.simulate_input("200");
     cx.simulate_keystrokes("enter");
     view.read_with(cx, |v, _| {
@@ -477,4 +477,47 @@ fn native_input_navigation_crud_and_settings_events(cx: &mut TestAppContext) {
             output.display()
         );
     }
+}
+
+#[gpui::test]
+fn invalid_amount_enter_preserves_single_line_input(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        bind_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let mut storage = Storage::open(&directory.path().join("single-line.sqlite3")).unwrap();
+    let id = storage
+        .create_asset(crate::model::CATEGORIES[0].0, "Checking", 10000)
+        .unwrap();
+    let mut entity = None;
+    let (_root, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
+        entity = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    let view = entity.unwrap();
+    cx.simulate_keystrokes("cmd-2");
+    click(cx, "¥100.00");
+    // Windows 没有 cmd-a 全选绑定，追加 200 后会留下这个非法金额。
+    cx.simulate_input("200");
+    view.read_with(cx, |v, cx| {
+        assert_eq!(v.amount.read(cx).value().as_str(), "100.00200");
+    });
+    cx.simulate_keystrokes("enter");
+    view.read_with(cx, |v, cx| {
+        assert!(v.error.is_some());
+        assert_eq!(v.editing, Some(Editing::AssetAmount(id)));
+        assert_eq!(v.data.assets[0].amount_cents, 10000);
+        assert_eq!(v.amount.read(cx).value().as_str(), "100.00200");
+    });
+    cx.simulate_keystrokes("secondary-a");
+    cx.simulate_input("200");
+    cx.simulate_keystrokes("enter");
+    view.read_with(cx, |v, cx| {
+        assert!(v.error.is_none(), "{:?}", v.error);
+        assert!(v.editing.is_none());
+        assert_eq!(v.data.assets[0].amount_cents, 20000);
+        assert_eq!(v.amount.read(cx).value().as_str(), "200");
+    });
 }
