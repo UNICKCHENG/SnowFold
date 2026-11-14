@@ -1,0 +1,4 @@
+SnowFold 0.1.0
+Offline native asset and subscription ledger.
+GPUI Component icons are embedded in the executable via gpui-component-assets 0.5.1 (Apache-2.0).
+SQLite is bundled in the executable.

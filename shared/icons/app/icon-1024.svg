@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="SnowFold">
+  <rect width="1024" height="1024" fill="none"/>
+  <rect x="84" y="84" width="856" height="856" rx="192" fill="#1a1a17"/>
+  <path d="M315 666 452 478l111 86 172-238" fill="none" stroke="#f3f3ee" stroke-width="94" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

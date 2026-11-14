@@ -1,0 +1,22 @@
+[package]
+name = "snowfold"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+snowfold-core = { path = "../../core", features = ["sync-http"] }
+anyhow.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest", "runtime_shaders"] }
+gpui-component-assets = "=0.5.1"
+gpui-component = { version = "=0.5.1", default-features = false }
+
+[dev-dependencies]
+gpui = { version = "=0.2.2", default-features = false, features = ["test-support", "runtime_shaders", "windows-manifest"] }
+tempfile = "3"
+
+[build-dependencies]
+embed-resource = "3"

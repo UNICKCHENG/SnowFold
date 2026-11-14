@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target/ci
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate tag and required signing secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Check workspace version and both Android signing secrets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: python3 .github/scripts/release.py validate
+
+  windows:
+    name: Windows ${{ matrix.arch }} portable executable
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+            msvc: x64
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+            msvc: amd64_arm64
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.96.0'
+          targets: ${{ matrix.target }}
+      - name: Configure x64 host and matching MSVC target tools
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          arch: ${{ matrix.msvc }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2 (peeled commit)
+        with:
+          workspaces: '. -> target/ci'
+          shared-key: release-windows-${{ matrix.arch }}-static-crt
+      - name: Build executable with static CRT and verify imported DLLs
+        shell: pwsh
+        env:
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: ./apps/desktop/packaging/windows/package.ps1 -Arch $env:PACKAGE_ARCH -Standalone
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: dist/SnowFold-windows-${{ matrix.arch }}.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    name: macOS universal disk image (SwiftUI)
+    needs: validate
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: '1.96.0'
+          # build-core.sh always builds the full XCFramework, iOS slices included.
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2 (peeled commit)
+        with:
+          workspaces: '. -> target/ci'
+          shared-key: release-apple-universal
+      - run: brew install xcodegen
+      - name: Build universal SwiftUI application and DMG
+        run: bash apps/apple/scripts/package-macos.sh
+      - name: Verify both architectures inside the mounted disk image
+        shell: bash
+        run: |
+          mountpoint=$(mktemp -d)
+          trap 'hdiutil detach "$mountpoint"; rmdir "$mountpoint"' EXIT
+          hdiutil attach dist/SnowFold-macos.dmg -nobrowse -readonly -mountpoint "$mountpoint"
+          binary="$mountpoint/SnowFold.app/Contents/MacOS/SnowFold"
+          lipo -info "$binary"
+          archs=" $(lipo -archs "$binary") "
+          [[ "$archs" == *" x86_64 "* && "$archs" == *" arm64 "* ]] || { echo "Not universal: $archs"; exit 1; }
+          test "$(readlink "$mountpoint/Applications")" = /Applications
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-macos
+          path: dist/SnowFold-macos.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  android:
+    name: Android signed APK
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/android-setup
+      - name: Decode temporary keystore, sign and verify APK
+        working-directory: apps/android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SNOWFOLD_ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/snowfold-release.keystore
+          SNOWFOLD_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        shell: bash
+        run: |
+          trap 'rm -f "$SNOWFOLD_ANDROID_KEYSTORE_FILE"' EXIT
+          python3 "$GITHUB_WORKSPACE/.github/scripts/release.py" decode-keystore
+          ./gradlew --no-daemon assembleRelease
+          apk=app/build/outputs/apk/release/app-release.apk
+          apksigner=$(printf '%s\n' "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          "$apksigner" verify --verbose "$apk"
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp "$apk" "$GITHUB_WORKSPACE/dist/SnowFold-android.apk"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-android
+          path: dist/SnowFold-android.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: [validate, windows, macos, android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Add notices and checksums for every release asset
+        run: |
+          cp apps/desktop/packaging/NOTICE.txt dist/NOTICE.txt
+          cd dist
+          sha256sum SnowFold-windows-x64.exe SnowFold-windows-arm64.exe SnowFold-macos.dmg SnowFold-android.apk NOTICE.txt > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Generate GitHub notes and append every commit author
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/snowfold-release-notes.md
+        run: python3 .github/scripts/release.py notes
+      - name: Publish a non-draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/snowfold-release-notes.md
+        shell: bash
+        run: |
+          prerelease=false
+          if [[ "$RELEASE_TAG" == *-* ]]; then prerelease=true; fi
+          gh release create "$RELEASE_TAG" --verify-tag --draft=false --prerelease="$prerelease" \
+            --title "SnowFold $RELEASE_TAG" --notes-file "$RELEASE_NOTES_FILE" \
+            dist/SnowFold-windows-x64.exe dist/SnowFold-windows-arm64.exe \
+            dist/SnowFold-macos.dmg dist/SnowFold-android.apk dist/NOTICE.txt dist/SHA256SUMS
