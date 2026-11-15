@@ -117,7 +117,11 @@ struct RootView: View {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .failed(let message):
+                #if os(macOS)
+                SplitRootView(startupFailure: message)
+                #else
                 StartupFailureView(message: message)
+                #endif
             case .ready:
                 readyContent
             }
@@ -366,6 +370,7 @@ extension View {
 // MARK: - 分栏根容器（Mac 与 iPad 常规宽度共用，docs/mobile-layout.md §8）
 
 struct SplitRootView: View {
+    var startupFailure: String? = nil
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.colorScheme) private var colorScheme
@@ -379,18 +384,25 @@ struct SplitRootView: View {
         @Bindable var router = router
         NavigationSplitView {
             sidebar
+                .disabled(startupFailure != nil)
+                .opacity(startupFailure == nil ? 1 : 0.5)
         } detail: {
-            detail
+            if let startupFailure {
+                StartupFailureView(message: startupFailure)
+                    .navigationTitle("SnowFold")
+            } else {
+                detail
+            }
         }
         .modifier(SplitModalPresenter())
-        .focusedSceneValue(\.appActions, AppActions(
+        .focusedSceneValue(\.appActions, startupFailure == nil ? AppActions(
             newMixed: {
                 router.modal = router.tab == .subscriptions ? .newSubscription : .newAsset(categoryCode: "cash")
             },
             newSubscription: { router.modal = .newSubscription },
             undo: { Task { await store.undoNow() } },
             selectTab: { router.tab = $0 }
-        ))
+        ) : nil)
         .onChange(of: store.ledger.assets.map(\.id)) { _, _ in
             if let id = selectedAssetID, !store.ledger.assets.contains(where: { $0.id == id }) {
                 selectedAssetID = nil
@@ -502,7 +514,17 @@ struct AssetsSplitView: View {
 
     var body: some View {
         // design.md §9.3：未选中时右栏显示总资产概览，点条目后才进入详情。
-        columns
+        Group {
+            #if os(macOS)
+            if store.ledger.assets.isEmpty {
+                MacEmptyStateContainer { AssetsView() }
+            } else {
+                columns
+            }
+            #else
+            columns
+            #endif
+        }
             .navigationTitle(Copy.assetsTitle)
             .background(Color.bg)
     }

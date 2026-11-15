@@ -13,6 +13,35 @@ struct OverviewView: View {
     @State private var contentHeight: CGFloat = 0
 
     var body: some View {
+        Group {
+            #if os(macOS)
+            if store.ledger.assets.isEmpty {
+                MacEmptyStateContainer {
+                    VStack(spacing: 0) {
+                        if store.keyUnavailable {
+                            keyUnavailableCard.padding(.horizontal, 32).padding(.top, 16)
+                        }
+                        EmptyStateView(
+                            icon: "ic-pie-chart", title: Copy.overviewEmptyTitle,
+                            message: Copy.overviewEmptyHelp, actionTitle: Copy.addAsset,
+                            action: { router.modal = .newAsset(categoryCode: "cash") }
+                        )
+                    }
+                }
+            } else {
+                pageScrollView
+            }
+            #else
+            pageScrollView
+            #endif
+        }
+        .background(Color.bg)
+        .navigationTitle(Copy.overviewTitle)
+        .phoneInlineTitle()
+        .phoneToolbar { PageToolbarActions() }
+    }
+
+    private var pageScrollView: some View {
         ScrollView {
             content
                 .padding(.horizontal, Ds.isDesktop ? 32 : 16)
@@ -20,10 +49,6 @@ struct OverviewView: View {
                 .padding(.bottom, 24)
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
-        .background(Color.bg)
-        .navigationTitle(Copy.overviewTitle)
-        .phoneInlineTitle()
-        .phoneToolbar { PageToolbarActions() }
     }
 
     @ViewBuilder
@@ -158,14 +183,14 @@ struct OverviewView: View {
                         ForEach(Array(assets.enumerated()), id: \.element.code) { index, category in
                             if index > 0 { rowSeparator(56) }
                             desktopCompositionRow(category, total: total)
-                                .padding(.vertical, 8)
+                                .padding(.vertical, Ds.isDesktop ? 0 : 8)
                         }
                         if let debt = overview.categories.first(where: \.isLiability) {
                             rowSeparator(56)
-                            desktopDebtRow(debt).padding(.vertical, 8)
+                            desktopDebtRow(debt).padding(.vertical, Ds.isDesktop ? 0 : 8)
                         }
                     }
-                    .padding(.vertical, 8)
+                    .padding(.vertical, Ds.isDesktop ? 0 : 8)
                 } else {
                     // 移动：8 高构成条 + 单行五条目
                     CompositionStackedBar(categories: assets, total: total)
@@ -227,7 +252,8 @@ struct OverviewView: View {
             }
             .padding(.leading, 16)
             .padding(.trailing, 16)
-            .frame(minHeight: Ds.doubleRowHeight)
+            .padding(.vertical, Ds.isDesktop ? 8 : 0)
+            .frame(minHeight: Ds.isDesktop ? 64 : Ds.doubleRowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -254,7 +280,8 @@ struct OverviewView: View {
             }
         }
         .padding(.horizontal, 16)
-        .frame(minHeight: Ds.doubleRowHeight)
+        .padding(.vertical, Ds.isDesktop ? 8 : 0)
+        .frame(minHeight: Ds.isDesktop ? 64 : Ds.doubleRowHeight)
     }
 
     private func mobileCompositionRow(_ category: CategoryTotal, total: Int64) -> some View {
@@ -350,7 +377,7 @@ struct OverviewView: View {
                             .font(Ds.aux())
                             .monospacedDigit()
                             .foregroundStyle(hasPending ? Color.neg : Color.text2)
-                            .frame(maxWidth: .infinity, alignment: Ds.isDesktop ? .center : .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
                     }

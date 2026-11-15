@@ -167,6 +167,7 @@ enum Copy {
     static let cycles = ["weekly", "monthly", "quarterly", "yearly"]
 
     static let groupNames = ["待确认", "本月", "下月", "之后", "已暂停"]
+    static let themeFieldLabel = "主题"
     static let themeSystem = "自动"
     static let themeLight = "浅色"
     static let themeDark = "深色"

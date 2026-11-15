@@ -415,6 +415,22 @@ struct EmptyStateView: View {
     }
 }
 
+#if os(macOS)
+/// 空页撑满当前滚动视口，窗口变高时仍在内容区居中。
+struct MacEmptyStateContainer<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                content()
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+        }
+    }
+}
+#endif
+
 // MARK: - 分段控件（§5.3）
 
 /// 外框 bg 底 + 1px sep、圆角 10、内边距 2；选中段 brand 底 on-brand 中等；段宽均分。
@@ -574,8 +590,9 @@ struct FormRow<Label: View, Field: View>: View {
             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         layout {
             label().font(Ds.body())
-            if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
+            if !Ds.isDesktop && !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
             field()
+                .frame(maxWidth: Ds.isDesktop ? .infinity : nil, alignment: .leading)
         }
     }
 }
@@ -638,7 +655,7 @@ struct UndoBanner: View {
                 .font(Ds.bodyMedium())
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
+            if !Ds.isDesktop { Spacer(minLength: 8) }
             Button {
                 Task { await store.undoNow() }
             } label: {
@@ -683,7 +700,7 @@ struct NoticeToast: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
-            Spacer(minLength: 8)
+            if !Ds.isDesktop { Spacer(minLength: 8) }
             Button {
                 store.dismissNotice()
             } label: {

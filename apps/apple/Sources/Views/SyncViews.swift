@@ -208,6 +208,7 @@ struct SyncSection: View {
                         }
                         Rectangle().fill(Color.sep).frame(height: 1)
                         HStack(alignment: .center, spacing: 12) {
+                            if Ds.isDesktop { Spacer(minLength: 0) }
                             Button {
                                 Task { await store.syncNow() }
                             } label: {
@@ -223,12 +224,13 @@ struct SyncSection: View {
                                 AppIcon(name: "ic-refresh", size: 16)
                                     .foregroundStyle(Color.brand)
                             }
-                            Spacer(minLength: 0)
+                            if !Ds.isDesktop { Spacer(minLength: 0) }
                         }
                         .padding(.horizontal, 16)
                         .frame(minHeight: Ds.rowHeight)
                     }
                 }
+                if Ds.isDesktop { FormHelpLine(message: Copy.syncHelp) }
                 if let message = store.syncError {
                     FormErrorLine(message: message)
                 }
@@ -258,6 +260,9 @@ struct SyncSection: View {
                                 Text(Copy.syncInterval1h).tag(UInt32(60))
                             }
                             .pickerStyle(.menu)
+                            #if os(macOS)
+                            .labelsHidden()
+                            #endif
                             .tint(.brand)
                             .disabled(saving || store.isSyncing)
                         }

@@ -6,18 +6,42 @@ struct SubscriptionsView: View {
     @Environment(Router.self) private var router
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var renewFeedback = 0
+    @State private var hoveredSubscriptionID: String?
+    @FocusState private var focusedAction: String?
 
     var body: some View {
+        Group {
+            #if os(macOS)
+            if store.ledger.subscriptions.isEmpty {
+                MacEmptyStateContainer { emptyState }
+            } else {
+                pageScrollView
+            }
+            #else
+            pageScrollView
+            #endif
+        }
+        .background(Color.bg)
+        .navigationTitle(Copy.subscriptionsTitle)
+        .phoneInlineTitle()
+        .phoneToolbar { PageToolbarActions() }
+        .sensoryFeedback(.success, trigger: store.highlightID)
+        .sensoryFeedback(.success, trigger: renewFeedback)
+        .accessibilityIdentifier("subscriptions-list")
+    }
+
+    private var emptyState: some View {
+        EmptyStateView(
+            icon: "ic-calendar-repeat", title: Copy.noSubscriptions,
+            message: Copy.noSubscriptionsHelp, actionTitle: Copy.newSubscription,
+            actionIcon: "ic-plus", action: { router.modal = .newSubscription }
+        )
+    }
+
+    private var pageScrollView: some View {
         ScrollView {
             if store.ledger.subscriptions.isEmpty {
-                EmptyStateView(
-                    icon: "ic-calendar-repeat",
-                    title: Copy.noSubscriptions,
-                    message: Copy.noSubscriptionsHelp,
-                    actionTitle: Copy.newSubscription,
-                    actionIcon: "ic-plus",
-                    action: { router.modal = .newSubscription }
-                )
+                emptyState
                 .frame(minHeight: 480)
                 .padding(.top, 24)
             } else {
@@ -37,18 +61,11 @@ struct SubscriptionsView: View {
                         groupSection(paused)
                     }
                 }
-                .padding(.horizontal, Ds.isDesktop ? 0 : 16)
-                .padding(.top, Ds.isDesktop ? 0 : 8)
+                .padding(.horizontal, Ds.isDesktop ? 32 : 16)
+                .padding(.top, Ds.isDesktop ? 16 : 8)
                 .padding(.bottom, 24)
             }
         }
-        .background(Color.bg)
-        .navigationTitle(Copy.subscriptionsTitle)
-        .phoneInlineTitle()
-        .phoneToolbar { PageToolbarActions() }
-        .sensoryFeedback(.success, trigger: store.highlightID)
-        .sensoryFeedback(.success, trigger: renewFeedback)
-        .accessibilityIdentifier("subscriptions-list")
     }
 
     // MARK: 统计头（§4.1 / §9.4）
@@ -59,7 +76,7 @@ struct SubscriptionsView: View {
         let usdDue = totals.first { $0.currency == "USD" }?.dueThisMonthCents ?? 0
         let active = store.ledger.subscriptions.filter { $0.status == "active" }.count
         let paused = store.ledger.subscriptions.count - active
-        return VStack(alignment: .leading, spacing: 0) {
+        let due = VStack(alignment: .leading, spacing: 0) {
             Text(Copy.dueThisMonth)
                 .font(Ds.bodyMedium())
                 .foregroundStyle(Color.text2)
@@ -71,24 +88,29 @@ struct SubscriptionsView: View {
                     .foregroundStyle(Color.text2)
                     .padding(.top, 4)
             }
+        }
+        return VStack(alignment: .leading, spacing: 0) {
             if Ds.isDesktop && !typeSize.isAccessibilitySize {
                 HStack(alignment: .bottom, spacing: 40) {
+                    due
                     spendingStat(Copy.monthlySpending, cny(totals, \.monthlyCents), usd(totals, \.monthlyCents))
                     spendingStat(Copy.annualSpending, cny(totals, \.annualCents), usd(totals, \.annualCents))
                     Spacer(minLength: 0)
                 }
-                .padding(.top, 8)
-            } else if !typeSize.isAccessibilitySize {
-                HStack(alignment: .top, spacing: 24) {
-                    spendingStat(Copy.monthlySpending, cny(totals, \.monthlyCents), usd(totals, \.monthlyCents))
-                    spendingStat(Copy.annualSpending, cny(totals, \.annualCents), usd(totals, \.annualCents))
-                }
-                .padding(.top, 16)
             } else {
-                spendingStat(Copy.monthlySpending, cny(totals, \.monthlyCents), usd(totals, \.monthlyCents))
+                due
+                if !typeSize.isAccessibilitySize {
+                    HStack(alignment: .top, spacing: 24) {
+                        spendingStat(Copy.monthlySpending, cny(totals, \.monthlyCents), usd(totals, \.monthlyCents))
+                        spendingStat(Copy.annualSpending, cny(totals, \.annualCents), usd(totals, \.annualCents))
+                    }
                     .padding(.top, 16)
-                spendingStat(Copy.annualSpending, cny(totals, \.annualCents), usd(totals, \.annualCents))
-                    .padding(.top, 12)
+                } else {
+                    spendingStat(Copy.monthlySpending, cny(totals, \.monthlyCents), usd(totals, \.monthlyCents))
+                        .padding(.top, 16)
+                    spendingStat(Copy.annualSpending, cny(totals, \.annualCents), usd(totals, \.annualCents))
+                        .padding(.top, 12)
+                }
             }
             Text(paused > 0
                  ? "\(active) 个在订 · \(paused) 个已暂停"
@@ -201,11 +223,11 @@ struct SubscriptionsView: View {
                             .font(Ds.bodyMedium())
                             .foregroundStyle(active ? Color.ink : Color.text2)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(pending ? overdueSubtitle(record)
+                        Text(pending && !Ds.isDesktop ? overdueSubtitle(record)
                              : "\(Copy.cycleLabel(record.cycle)) · \(Fmt.day(record.nextChargeOn))")
                             .font(Ds.aux())
                             .monospacedDigit()
-                            .foregroundStyle(pending ? Color.neg : Color.text2)
+                            .foregroundStyle(pending && !Ds.isDesktop ? Color.neg : Color.text2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -219,23 +241,49 @@ struct SubscriptionsView: View {
                 cycle: Copy.cycleLabel(record.cycle), date: Fmt.day(record.nextChargeOn),
                 status: active ? "在订" : "已暂停"
             ))
-            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
+            if Ds.isDesktop {
+                let badge = Fmt.chargeBadge(for: record.nextChargeOn, today: Fmt.today)
+                let kind: BadgeKind = switch badge.kind {
+                case .danger: .danger
+                case .accent: .warn
+                case .neutral: .neutral
+                }
+                TagBadge(text: badge.text, kind: kind)
+                    .accessibilityHidden(badge.text.isEmpty)
                 MoneyText(cents: record.amountCents, currency: record.currency,
                           font: Ds.bodyMedium(), color: active ? .ink : .text2)
-                if pending {
-                    Button { renew(record) } label: {
-                        HStack(spacing: 6) {
-                            AppIcon(name: "ic-check", size: 14)
-                            Text("已续费")
+                    .frame(minWidth: 120, alignment: .trailing)
+                HStack {
+                    if pending {
+                        Button { renew(record) } label: {
+                            Text(Copy.markRenewed)
                         }
+                        .buttonStyle(SoftButtonStyle())
+                        .accessibilityLabel(Copy.markRenewed)
+                        .accessibilityIdentifier("renew-" + record.id)
+                    } else {
+                        desktopActions(record, active: active)
                     }
-                    .buttonStyle(SoftButtonStyle())
-                    .frame(minHeight: Ds.isDesktop ? 28 : 44)
-                    .accessibilityLabel(Copy.markRenewed)
-                    .accessibilityIdentifier("renew-" + record.id)
+                }
+                .frame(width: 112, alignment: .trailing)
+            } else {
+                VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
+                    MoneyText(cents: record.amountCents, currency: record.currency,
+                              font: Ds.bodyMedium(), color: active ? .ink : .text2)
+                    if pending {
+                        Button { renew(record) } label: {
+                            HStack(spacing: 6) {
+                                AppIcon(name: "ic-check", size: 14)
+                                Text("已续费")
+                            }
+                        }
+                        .buttonStyle(SoftButtonStyle())
+                        .frame(minHeight: Ds.isDesktop ? 28 : 44)
+                        .accessibilityLabel(Copy.markRenewed)
+                        .accessibilityIdentifier("renew-" + record.id)
+                    }
                 }
             }
-            if Ds.isDesktop && !pending { desktopActions(record, active: active) }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -252,8 +300,12 @@ struct SubscriptionsView: View {
         }
         .disabled(store.isWorking)
         return Group {
-            if Ds.isDesktop { main }
-            else {
+            if Ds.isDesktop {
+                main.onHover { hovering in
+                    if hovering { hoveredSubscriptionID = record.id }
+                    else if hoveredSubscriptionID == record.id { hoveredSubscriptionID = nil }
+                }
+            } else {
                 SwipeableRow(specs: mobileSwipeSpecs(record, pending: pending, active: active)) { main }
             }
         }
@@ -289,7 +341,7 @@ struct SubscriptionsView: View {
         return specs
     }
 
-    /// 桌面悬停动作列：暂停/恢复 与 删除（宽 88，图标 20）。
+    /// 悬停或键盘聚焦时显示动作，隐藏时仍保留列宽与 Tab 入口。
     private func desktopActions(_ record: SubscriptionRecord, active: Bool) -> some View {
         HStack(spacing: 8) {
             Button {
@@ -302,6 +354,7 @@ struct SubscriptionsView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(active ? Copy.pause : Copy.resume)
+            .focused($focusedAction, equals: record.id + "-pause")
             .help(active ? Copy.pause : Copy.resume)
             Button {
                 Task { await store.deleteSubscription(id: record.id) }
@@ -313,9 +366,14 @@ struct SubscriptionsView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Copy.delete)
+            .focused($focusedAction, equals: record.id + "-delete")
         }
-        .frame(width: 88)
-        .opacity(0.72)
+        .opacity(actionsVisible(record.id) ? 1 : 0)
+        .allowsHitTesting(actionsVisible(record.id))
+    }
+
+    private func actionsVisible(_ id: String) -> Bool {
+        hoveredSubscriptionID == id || focusedAction == id + "-pause" || focusedAction == id + "-delete"
     }
 
     private func renew(_ record: SubscriptionRecord) {
