@@ -55,9 +55,10 @@ const groups = ['overdue', 'overdue', 'this_month', 'this_month', 'this_month', 
 const longSubs = groups.map((g, i) => ({
   id: 'L' + i, name: SUB_NAMES[i % 10] + (i >= 10 ? ` ${Math.floor(i / 10) + 1}` : ''),
   cents: i % 3 === 1 ? 9999 + i * 100 : (i === 0 ? 99999999 : 2500 + i * 731), cur: i % 3 === 1 ? 'USD' : 'CNY',
-  cycle: ['每月', '每年', '每季', '每周'][i % 4], next: '2026-11-' + String(10 + (i % 18)).padStart(2, '0'),
-  group: g, overdue: g === 'overdue' ? 3 + i : undefined, days: g === 'overdue' || g === 'paused' ? undefined : (i % 9) + (g === 'later' ? 60 : g === 'next_month' ? 20 : 0),
-}));
+  cycle: ['每月', '每年', '每季', '每周'][i % 4], group: g, overdue: g === 'overdue' ? 3 + i : undefined, days: g === 'overdue' || g === 'paused' ? undefined : (i % 9) + (g === 'later' ? 60 : g === 'next_month' ? 20 : 0),
+})).map(s => ({ ...s, next: shiftDay(s.group === 'overdue' ? -s.overdue : s.group === 'paused' ? 5 : s.days) }));
+// 下次扣费日由分组倒推，保证与核心按日期分组的结果一致
+function shiftDay(n) { const d = new Date(TODAY + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 window.DATASETS = {
   normal,
   long: { assets: longAssets, subs: longSubs, sync: true },

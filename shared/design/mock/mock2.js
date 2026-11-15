@@ -7,7 +7,7 @@ const mob = form === 'mobile';
 const actBtn = (label, kind = 'secondary') => mob ? (kind === 'danger' ? '' : icon('chevron-right', 16, false, 'c2')) : `<button class="btn btn-${kind}" style="height:28px">${label}</button>`;
 const themeSeg = `<div class="seg" style="${mob ? 'width:100%' : 'width:240px'}"><div class="on">自动</div><div>浅色</div><div>深色</div></div>`;
 function settingsGeneral() {
-  return [group('外观', [mob ? `<div class="col" style="padding:12px 16px;gap:8px"><span class="t-body">主题</span>${themeSeg}</div>` : setRow('主题', '跟随系统会自动匹配电脑的深浅色。', themeSeg)])];
+  return [group('外观', [mob ? `<div class="col" style="padding:12px 16px;gap:8px"><span class="t-body">主题</span>${themeSeg}</div>` : setRow('主题', '「自动」会跟随系统的深浅色。', themeSeg)])];
 }
 function settingsData() {
   return [group('数据', [setRow('导出备份', '保存为 JSON 文件，可随时导入恢复。', actBtn('导出')), setRow('导入备份', '会覆盖当前所有记录，请先导出备份。', actBtn('导入')),

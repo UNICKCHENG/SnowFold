@@ -150,7 +150,7 @@ function subsBody() {
   if (!D.subs.length) return `<div class="col" style="height:100%;justify-content:center;padding-bottom:8%">${emptyState('calendar-repeat', '还没有订阅', '记下常用服务，随时知道接下来要扣多少钱', `${icon('plus', 16)}新建订阅`)}</div>`;
   const usd = (o, cls) => o.USD ? `<span class="${cls} c2 num">+ ${money(o.USD, 'USD')}</span>` : '';
   const stat = (label, o) => `<div class="col" style="gap:2px;flex:1;min-width:0"><span class="t-caption c2 row" style="gap:4px">${label}${icon('info', 16)}</span>${amt(o.CNY, 'CNY', 't-headline')}${usd(o, 't-caption')}</div>`;
-  const groups = GROUPS.map(([g, label]) => { const items = D.subs.filter(s => s.group === g); if (!items.length) return '';
+  const groups = GROUPS.map(([g, label]) => { const items = D.subs.filter(s => s.group === g).sort((a, b) => a.next.localeCompare(b.next)); if (!items.length) return '';
     return `<div><div class="sec-head"><span class="t-caption-m ${g === 'overdue' ? 'cneg' : 'c2'}">${label}</span><span class="t-caption c2">${items.length}</span></div><div class="card">${items.map(subRow).join('')}</div></div>`; }).join('');
   const head = `<div class="row" style="gap:${wide ? 40 : 16}px;align-items:flex-end;flex-wrap:wrap;row-gap:16px">
       <div class="col" style="gap:4px;${wide ? '' : 'width:100%'}"><span class="t-body-m c2">本月待扣</span>${hero(S.due.CNY, 'title')}${usd(S.due, 't-body')}</div>
