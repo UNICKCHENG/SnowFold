@@ -26,7 +26,7 @@ build_slice() {
     echo "== Building snowfold-core: $target =="
     CARGO_TARGET_DIR="$TARGET_DIR" \
         SDKROOT="$(xcrun --sdk "$sdk" --show-sdk-path)" \
-        IPHONEOS_DEPLOYMENT_TARGET=17.0 MACOSX_DEPLOYMENT_TARGET=14.0 \
+        IPHONEOS_DEPLOYMENT_TARGET=26.0 MACOSX_DEPLOYMENT_TARGET=26.0 \
         cargo build --locked --release --manifest-path "$CORE_MANIFEST" --target "$target"
     mkdir -p "$STAGING/$target"
     cp "$TARGET_DIR/$target/release/libsnowfold_core.a" "$STAGING/$target/"

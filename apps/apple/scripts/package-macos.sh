@@ -13,11 +13,18 @@ done
 # build-core 自身负责绑定与 XcodeGen；通用模式只在正式打包时启用。
 SNOWFOLD_MACOS_UNIVERSAL=1 bash "$APPLE_ROOT/scripts/build-core.sh"
 
+# CI 证据模式：SNOWFOLD_ACCEPTANCE_CAPTURE=1 时为 Release 包注入 ACCEPTANCE 编译条件，
+# 仅启用截图钩子（AcceptanceCapture 与启动参数钩子）；默认打包不带任何钩子。
+CAPTURE_FLAGS=()
+if [ "${SNOWFOLD_ACCEPTANCE_CAPTURE:-0}" = "1" ]; then
+    CAPTURE_FLAGS=("OTHER_SWIFT_FLAGS=$(inherited) -DACCEPTANCE")
+fi
 xcodebuild build \
     -project "$APPLE_ROOT/SnowFold.xcodeproj" \
     -scheme SnowFold-macOS -configuration Release \
     -destination 'generic/platform=macOS' \
     -derivedDataPath "$DERIVED_DATA" \
+    "${CAPTURE_FLAGS[@]+"${CAPTURE_FLAGS[@]}"}" \
     ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO
 
 APP="$DERIVED_DATA/Build/Products/Release/SnowFold.app"

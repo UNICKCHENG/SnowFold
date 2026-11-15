@@ -48,8 +48,12 @@ final class SnowFoldStore {
     private(set) var annuals: [String: Int64] = [:]
     private(set) var theme: ThemePreference = .system
     private(set) var keyFingerprint: String?
+    /// 同步密钥不可用：总览顶部 warn 卡片（§9.7），导入恢复码后解除。
+    private(set) var keyUnavailable = false
     private(set) var undoState: UndoState?
     private(set) var notice: String?
+    /// 通知条按错误样式呈现（check / warning-triangle）。
+    private(set) var noticeIsError = false
     private(set) var isWorking = false
     /// 新建记录后短暂高亮。
     private(set) var highlightID: String?
@@ -105,16 +109,18 @@ final class SnowFoldStore {
             theme = (try? await background { try core.theme() }) ?? .system
             do {
                 keyFingerprint = try await background { try core.keyFingerprint() }
+                keyUnavailable = false
             } catch {
+                keyUnavailable = true
                 if notice == nil {
-                    notice = Copy.startupKeyUnavailable(Copy.userMessage(for: error))
+                    showErrorNotice(Copy.startupKeyUnavailable(Copy.userMessage(for: error)))
                 }
             }
             do {
                 try await background { try core.startupBackup() }
             } catch {
                 if notice == nil {
-                    notice = Copy.startupBackupFailed(Copy.userMessage(for: error))
+                    showErrorNotice(Copy.startupBackupFailed(Copy.userMessage(for: error)))
                 }
             }
         } catch {
@@ -147,7 +153,7 @@ final class SnowFoldStore {
             self.groups = groups
             self.annuals = annuals
         } catch {
-            notice = Copy.localDataUnreadable(Copy.userMessage(for: error))
+            showErrorNotice(Copy.localDataUnreadable(Copy.userMessage(for: error)))
             return
         }
         do {
@@ -183,7 +189,7 @@ final class SnowFoldStore {
         do {
             try await refreshOrThrow()
         } catch {
-            notice = "\(Copy.savedButReloadFailed)：\(Copy.userMessage(for: error))"
+            showErrorNotice("\(Copy.savedButReloadFailed)：\(Copy.userMessage(for: error))")
         }
         scheduleAfterEdit()
         return value
@@ -244,7 +250,7 @@ final class SnowFoldStore {
             undoState = nil
         } catch {
             undoState = nil
-            notice = Copy.userMessage(for: error)
+            showErrorNotice(Copy.userMessage(for: error))
         }
     }
 
@@ -259,8 +265,14 @@ final class SnowFoldStore {
     }
 
     /// 由编辑器等调用方设置全局通知（例如记录在别处被删除）。
-    func showNotice(_ message: String) {
+    func showNotice(_ message: String, isError: Bool = false) {
         notice = message
+        noticeIsError = isError
+    }
+
+    /// 错误通知：warning-triangle 样式，需手动关闭。
+    func showErrorNotice(_ message: String) {
+        showNotice(message, isError: true)
     }
 
     // MARK: 资产
@@ -298,7 +310,7 @@ final class SnowFoldStore {
             let ticket = try await write { try $0.deleteAsset(id: id) }
             offerUndo(ticket, Copy.assetDeleted)
         } catch {
-            notice = Copy.userMessage(for: error)
+            showErrorNotice(Copy.userMessage(for: error))
         }
     }
 
@@ -323,7 +335,7 @@ final class SnowFoldStore {
         do {
             try await write { try $0.setSubscriptionPaused(id: id, isPaused: paused) }
         } catch {
-            notice = Copy.userMessage(for: error)
+            showErrorNotice(Copy.userMessage(for: error))
         }
     }
 
@@ -332,9 +344,9 @@ final class SnowFoldStore {
         let on = Fmt.today
         do {
             let result = try await write { try $0.renewSubscription(id: id, on: on) }
-            notice = Copy.renewed(result.periods)
+            showNotice(Copy.renewed(result.periods))
         } catch {
-            notice = Copy.userMessage(for: error)
+            showErrorNotice(Copy.userMessage(for: error))
         }
     }
 
@@ -343,7 +355,7 @@ final class SnowFoldStore {
             let ticket = try await write { try $0.deleteSubscription(id: id) }
             offerUndo(ticket, Copy.subscriptionDeleted)
         } catch {
-            notice = Copy.userMessage(for: error)
+            showErrorNotice(Copy.userMessage(for: error))
         }
     }
 
@@ -354,7 +366,7 @@ final class SnowFoldStore {
             try await write { try $0.saveTheme(theme: theme) }
             self.theme = theme
         } catch {
-            notice = "主题未保存：\(Copy.userMessage(for: error))"
+            showErrorNotice("主题未保存：\(Copy.userMessage(for: error))")
         }
     }
 
@@ -374,7 +386,7 @@ final class SnowFoldStore {
     func importJSON(_ text: String) async throws {
         try await write { try $0.importJson(json: text) }
         invalidateUndo()
-        notice = Copy.dataUpdated
+        showNotice(Copy.dataUpdated)
     }
 
     func exportSealed() async throws -> Data {
@@ -392,7 +404,7 @@ final class SnowFoldStore {
     func importSealed(_ data: Data) async throws {
         try await write { try $0.importSealed(bytes: data) }
         invalidateUndo()
-        notice = Copy.dataUpdated
+        showNotice(Copy.dataUpdated)
         await reloadKeyFingerprint()
     }
 
@@ -417,7 +429,7 @@ final class SnowFoldStore {
         }
         keyFingerprint = result.fingerprint
         await reloadSyncStatus()
-        notice = result.previousKeyBackedUp ? Copy.keyReplaced(result.fingerprint) : Copy.keyImported(result.fingerprint)
+        showNotice(result.previousKeyBackedUp ? Copy.keyReplaced(result.fingerprint) : Copy.keyImported(result.fingerprint))
     }
 
     /// 清空全部数据（确认后调用）。
@@ -425,15 +437,20 @@ final class SnowFoldStore {
         do {
             try await write { try $0.clearData() }
             invalidateUndo()
-            notice = Copy.dataUpdated
+            showNotice(Copy.dataUpdated)
         } catch {
-            notice = Copy.userMessage(for: error)
+            showErrorNotice(Copy.userMessage(for: error))
         }
     }
 
     private func reloadKeyFingerprint() async {
         guard let core else { return }
-        keyFingerprint = try? await background { try core.keyFingerprint() }
+        do {
+            keyFingerprint = try await background { try core.keyFingerprint() }
+            keyUnavailable = false
+        } catch {
+            keyUnavailable = true
+        }
     }
 
     // MARK: 前台同步
@@ -479,13 +496,13 @@ final class SnowFoldStore {
         try await changeSyncConfiguration { try $0.configureSync(config: config, secret: secret) }
         syncError = nil
         pendingLocalChanges = false
-        notice = Copy.syncConfigSaved
+        showNotice(Copy.syncConfigSaved)
     }
 
     func setSyncEnabled(_ enabled: Bool) async throws {
         try await changeSyncConfiguration { try $0.setSyncEnabled(enabled: enabled) }
         intervalAnchor = .distantPast
-        notice = enabled ? Copy.syncEnabled : Copy.syncDisabled
+        showNotice(enabled ? Copy.syncEnabled : Copy.syncDisabled)
         scheduleInterval()
     }
 
@@ -500,7 +517,7 @@ final class SnowFoldStore {
         try await changeSyncConfiguration { try $0.clearSyncConfig() }
         syncError = nil
         pendingLocalChanges = false
-        notice = Copy.syncConfigCleared
+        showNotice(Copy.syncConfigCleared)
     }
 
     private func changeSyncConfiguration(_ work: @escaping @Sendable (SnowFoldCore) throws -> Void) async throws {
@@ -534,14 +551,14 @@ final class SnowFoldStore {
             pendingLocalChanges = report.pendingLocalChanges
             await reloadSyncStatus()
             if trigger == .manual {
-                notice = Copy.syncCompleted(report) + (report.pendingLocalChanges ? " · " + Copy.syncPendingChanges : "")
+                showNotice(Copy.syncCompleted(report)) + (report.pendingLocalChanges ? " · " + Copy.syncPendingChanges : "")
             }
             if report.pendingLocalChanges { scheduleAfterEdit(pending: true) }
         } catch {
             await reloadSyncStatus()
             if error as? CoreError != .Conflict {
                 syncError = Copy.syncMessage(for: error)
-                if trigger == .manual { notice = syncError }
+                if trigger == .manual { showErrorNotice(syncError) }
             }
         }
         // 失败也等一个周期再重试，避免已到期的时间戳造成紧密重试。

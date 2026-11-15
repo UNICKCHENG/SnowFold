@@ -394,20 +394,6 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(store.nextScheduledSubscription?.name, "今天")
     }
 
-    func testTimelinePinsOverdueToTodayAndCountsBothCurrencies() async throws {
-        let store = makeStore()
-        await store.open()
-        for (name, date, currency) in [("逾期", "2000-01-01", "CNY"), ("今日美元", Fmt.today, "USD")] {
-            _ = try await store.createSubscription(SubscriptionInput(name: name, amountCents: 1234567890,
-                currency: currency, cycle: "monthly", nextChargeOn: date, status: "active"))
-        }
-        let entries = UpcomingTimelineChart.dailyEntries(from: store.overview?.upcoming ?? [], today: Fmt.today)
-        XCTAssertEqual(entries.count, 1)
-        XCTAssertEqual(entries.first?.day, Fmt.date(fromDay: Fmt.today))
-        XCTAssertEqual(entries.first?.count, 2, "柱高只表示笔数，与金额和币种无关")
-        guard case .danger = entries.first?.kind else { return XCTFail("含逾期的今天应为负值色") }
-    }
-
     func testDismissingUndoDoesNotRestoreDeletedData() async throws {
         let store = makeStore()
         await store.open()

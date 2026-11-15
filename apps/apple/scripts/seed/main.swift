@@ -27,10 +27,27 @@ func shift(days: Int = 0, months: Int = 0) -> String {
 
 let core = try SnowFoldCore.open(dataDir: dataDirectory, keyStore: KeychainKeyStore())
 
+// 审计分支改动沿用：CI 临时签名可能没有钥匙串写权限；造数不依赖同步密钥，导出失败不阻断。
+
 // 主金额回归用：只有这一项资产，净资产恰为 ¥12,345,678.90。
 if arguments.contains("--hero") {
     _ = try core.createAsset(categoryCode: "cash", assetName: "招商银行朝朝宝（活期理财）家庭备用金账户", amountCents: 1_234_567_890)
     print("hero regression seeded")
+    exit(0)
+}
+
+// 负净资产回归用：负债压过资产，净资产恰为 −¥1,234,567.89（docs/design.md §2 负数焦点金额）。
+if arguments.contains("--neg") {
+    _ = try core.createAsset(categoryCode: "cash", assetName: "活期存款", amountCents: 100_000_000)
+    _ = try core.createAsset(categoryCode: "investment", assetName: "基金定投账户", amountCents: 500_000_00)
+    _ = try core.createAsset(categoryCode: "debt", assetName: "房贷（等额本息）", amountCents: 83_456_789)
+    _ = try core.createAsset(categoryCode: "debt", assetName: "车贷剩余本金", amountCents: 28_889_000)
+    let spec: (String, Int64, String, String, String) = ("云服务年费", 12_000, "CNY", "yearly", shift(days: -3))
+    _ = try core.createSubscription(subscription: SubscriptionInput(
+        name: spec.0, amountCents: spec.1, currency: spec.2, cycle: spec.3, nextChargeOn: spec.4, status: "active"))
+    try core.saveTheme(theme: .system)
+    let overview = try core.overview(on: dayString(Date()))
+    print("neg seeded: net \(overview.netAssetsCents) cents")
     exit(0)
 }
 
@@ -114,6 +131,6 @@ for (name, cents, currency, cycle, next) in subscriptionSpecs {
 
 // 本机主题与密钥：让截图与真实使用一致。
 try core.saveTheme(theme: .system)
-_ = try core.exportSealed()
+_ = try? core.exportSealed()
 let overview = try core.overview(on: dayString(Date()))
 print("seeded: \(overview.totalAssetsCents) cents assets, \(overview.activeSubscriptions) active subs, \(overview.pausedSubscriptions) paused")

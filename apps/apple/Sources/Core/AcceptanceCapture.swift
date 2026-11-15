@@ -31,7 +31,10 @@ enum AcceptanceCapture {
             if let appearance {
                 NSApp.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
             }
-            guard let window = NSApp.windows.first(where: { $0.windowNumber > 0 && $0.canBecomeKey }) else {
+            // 设置窗口截图钩子：优先当前键窗（主窗口可能仍是键窗时取能成为键窗的最上层窗口）。
+            let candidate = NSApp.keyWindow.flatMap { $0.windowNumber > 0 && $0.canBecomeKey ? $0 : nil }
+                ?? NSApp.windows.first(where: { $0.windowNumber > 0 && $0.canBecomeKey })
+            guard let window = candidate else {
                 writeFailureMarker(output, reason: "no application window: \(NSApp.windows.map { "\($0.title) visible=\($0.isVisible)" }.joined(separator: "; "))")
                 exit(3)
             }

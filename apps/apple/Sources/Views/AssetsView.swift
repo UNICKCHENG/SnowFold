@@ -1,187 +1,320 @@
 import SwiftUI
 
-/// iPhone 推入详情；iPad/Mac 由分栏容器接收选择，复用同一列表与详情。
+// MARK: - 资产页（iPhone 推入形态；iPad/Mac 用 AssetsSplitView）
+
 struct AssetsView: View {
+    var body: some View {
+        AssetsListView(selectedAssetID: .constant(nil as String?), scrollTo: .constant(nil as String?))
+            .navigationTitle(Copy.assetsTitle)
+            .phoneInlineTitle()
+            .phoneToolbar { PageToolbarActions() }
+    }
+}
+
+// MARK: - 资产列表（移动整页 / 桌面左栏，§9.3 左栏）
+
+struct AssetsListView: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
-    @Environment(\.dynamicTypeSize) private var typeSize
-    var onSelect: ((String) -> Void)? = nil
-    var selectedAssetID: String? = nil
-    @State private var newAssetCategory: String?
-    @State private var renameTarget: AssetRecord?
-    @State private var balanceTarget: AssetRecord?
-
-    private struct CategoryPick: Identifiable {
-        let code: String
-        var id: String { code }
-    }
+    @Binding var selectedAssetID: String?
+    @Binding var scrollTo: String?
+    /// 分栏形态：点行选中右栏；移动整页：推入详情。
+    var selectionMode = false
+    var showsSummary = true
+    var compactEmpty = false
 
     var body: some View {
         ScrollViewReader { proxy in
-            List {
-                summarySection
-                ForEach(Copy.categoryOrder, id: \.self) { code in categorySection(code) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if showsSummary { summary.padding(.bottom, 20) }
+                    let categories = Copy.categoryOrder
+                    ForEach(Array(categories.enumerated()), id: \.element) { index, code in
+                        if index > 0 { Spacer(minLength: 24) }
+                        categorySection(code)
+                    }
+                }
+                .padding(.horizontal, Ds.isDesktop || !showsSummary ? 0 : 16)
+                .padding(.top, showsSummary ? 0 : 8)
+                .padding(.bottom, 24)
             }
-            .accessibilityIdentifier("assets-list")
             .onChange(of: router.focusAssetCategory) { _, code in
                 guard let code else { return }
                 withAnimation { proxy.scrollTo(code, anchor: .top) }
                 router.focusAssetCategory = nil
             }
+            .onChange(of: scrollTo) { _, code in
+                guard let code else { return }
+                withAnimation { proxy.scrollTo(code, anchor: .top) }
+                scrollTo = nil
+            }
         }
-        .scrollContentBackground(.hidden)
-        .background(Color.canvas)
-        .navigationTitle(Copy.assetsTitle)
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.large)
-        #endif
-        .settingsToolbar {
-            Button { newAssetCategory = "cash" } label: { Label("新建资产", systemImage: "plus").accessibilityIdentifier("new-asset") }
-        }
-        .animation(.default, value: store.ledger)
-        .sensoryFeedback(.success, trigger: store.highlightID)
-        .sensoryFeedback(.warning, trigger: store.undoState)
-        .sheet(item: Binding(
-            get: { newAssetCategory.map(CategoryPick.init) },
-            set: { newAssetCategory = $0?.code }
-        )) { pick in AssetEditorSheet(mode: .new(categoryCode: pick.code)) }
-        .onChange(of: store.syncGeneration) { _, _ in
-            if let target = renameTarget, !store.ledger.assets.contains(where: { $0.id == target.id }) { renameTarget = nil }
-            if let target = balanceTarget, !store.ledger.assets.contains(where: { $0.id == target.id }) { balanceTarget = nil }
-        }
-        .sheet(item: $renameTarget) { AssetEditorSheet(mode: .rename($0)) }
-        .sheet(item: $balanceTarget) { AssetEditorSheet(mode: .balance($0)) }
+        .background(Color.bg)
+        .accessibilityIdentifier("assets-list")
     }
 
-    private var summarySection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(Copy.totalAssets).font(.caption).foregroundStyle(Color.inkMuted)
-                if let total = store.overview?.totalAssetsCents {
-                    HeroAmountText(cents: total)
-                } else { InlineErrorPanel(message: Copy.assetTotalOverflow) }
-                Text(Copy.assetsSubtitle(store.ledger.assets.count))
-                    .font(.footnote).foregroundStyle(Color.inkMuted)
-                if let overview = store.overview {
-                    Text("总负债 \(Fmt.money(overview.totalDebtCents, "CNY")) · 净资产 \(Fmt.money(overview.netAssetsCents, "CNY"))")
-                        .font(.caption).monospacedDigit().foregroundStyle(Color.inkMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+    // MARK: 汇总（移动页焦点，§3.1）
+
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(Copy.totalAssets)
+                .font(Ds.bodyMedium())
+                .foregroundStyle(Color.text2)
+            if let total = store.overview?.totalAssetsCents {
+                FocusAmountText(cents: total, level: .page)
+            } else {
+                InlineErrorPanel(message: Copy.assetTotalOverflow)
             }
-            .padding(.vertical, 8)
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
+            HStack(alignment: .top, spacing: 20) {
+                summaryStat(Copy.totalDebt, Fmt.money(store.overview?.totalDebtCents ?? 0, "CNY"), color: .neg)
+                summaryStat(Copy.netAssets, Fmt.money(store.overview?.netAssetsCents ?? 0, "CNY"), color: .ink)
+            }
+            .padding(.top, 8)
+        }
+        .accessibilityIdentifier("assets-summary")
+    }
+
+    private func summaryStat(_ label: String, _ value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(Ds.aux()).foregroundStyle(Color.text2)
+            Text(value)
+                .font(Ds.bodyMedium())
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
         }
     }
+
+    // MARK: 分类分区
 
     private func categorySection(_ code: String) -> some View {
         let assets = store.ledger.assets.filter { $0.categoryCode == code }
         let total = store.overview?.categories.first { $0.code == code }?.amountCents
-        return Section {
-            if assets.isEmpty {
-                Button { newAssetCategory = code } label: {
-                    Label("添加" + Copy.categoryName(code), systemImage: "plus")
-                        .font(.subheadline.weight(.medium))
-                        .frame(maxWidth: .infinity, minHeight: 54)
-                        .padding(12)
-                        .overlay(RoundedRectangle(cornerRadius: 14)
-                            .strokeBorder(Color.hairlineStrong, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentBrand)
-                .accessibilityIdentifier("add-empty-" + code)
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-            }
-            ForEach(assets, id: \.id) { asset in assetRow(asset) }
-        } header: {
-            let layout = typeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
-            layout {
-                HStack(spacing: 7) {
-                    CategoryChip(code: code, size: 24)
-                    Text(Copy.categoryName(code)).font(.caption.weight(.semibold))
-                    Text("\(assets.count)").font(.caption.monospacedDigit())
-                }
-                if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                CategoryChip(code: code, size: 28)
+                Text(Copy.categoryName(code))
+                    .font(Ds.sectionTitle())
+                    .foregroundStyle(Color.ink)
+                Text(Copy.itemCount(assets.count))
+                    .font(Ds.aux())
+                    .monospacedDigit()
+                    .foregroundStyle(Color.text2)
+                Spacer(minLength: 12)
                 if let total {
-                    MoneyText(cents: total, currency: "CNY", font: .footnote.weight(.semibold),
-                              color: code == "debt" ? .negativeBrand : .ink)
-                } else { Text(Copy.totalOutOfRange).font(.caption) }
-                if !assets.isEmpty {
-                    Button { newAssetCategory = code } label: { Image(systemName: "plus") }
-                        .buttonStyle(.borderless)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .accessibilityLabel("添加" + Copy.categoryName(code))
+                    MoneyText(cents: total, currency: "CNY", font: Ds.bodyMedium(),
+                              color: code == "debt" ? .neg : .ink)
+                } else {
+                    Text(Copy.totalOutOfRange)
+                        .font(Ds.aux())
+                        .foregroundStyle(Color.neg)
                 }
             }
-            .foregroundStyle(Color.inkMuted)
             .id(code)
-            .textCase(nil)
+            Card {
+                if assets.isEmpty {
+                    compactEmptyRow(code)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(assets.enumerated()), id: \.element.id) { index, asset in
+                            if index > 0 { rowSeparator }
+                            assetRow(asset)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
         }
+    }
+
+    private var rowSeparator: some View {
+        Rectangle().fill(Color.sep).frame(height: 1).padding(.leading, 16)
+    }
+
+    /// 分类空状态的紧凑行：图标块 + 暂无{分类} + 「添加」浅色按钮。
+    private func compactEmptyRow(_ code: String) -> some View {
+        HStack(spacing: 12) {
+            CategoryChip(code: code)
+            Text(Copy.categoryEmpty(code))
+                .font(Ds.body())
+                .foregroundStyle(Color.text2)
+            Spacer(minLength: 8)
+            Button {
+                router.modal = .newAsset(categoryCode: code)
+            } label: {
+                HStack(spacing: 6) {
+                    AppIcon(name: "ic-plus", size: 14)
+                    Text(Copy.add)
+                }
+            }
+            .buttonStyle(SoftButtonStyle())
+            .accessibilityIdentifier("add-empty-" + code)
+            .accessibilityLabel(Copy.add + Copy.categoryName(code))
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: Ds.rowHeight)
     }
 
     private func assetRow(_ asset: AssetRecord) -> some View {
-        Group {
-            if let onSelect {
-                Button { onSelect(asset.id) } label: { assetLabel(asset) }
+        let selected = selectedAssetID == asset.id
+        let label = HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(asset.name)
+                    .font(Ds.body())
+                    .foregroundStyle(Color.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            MoneyText(cents: asset.amountCents, currency: "CNY", font: Ds.bodyMedium())
+            if !selectionMode {
+                AppIcon(name: "ic-chevron-right", size: 14)
+                    .foregroundStyle(Color.text2)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: Ds.isDesktop ? 40 : 52)
+        .contentShape(Rectangle())
+
+        let row = Group {
+            if selectionMode {
+                // 分栏形态：点行选中
+                Button { selectedAssetID = asset.id } label: { label }
                     .buttonStyle(.plain)
             } else {
-                NavigationLink { AssetDetailView(assetID: asset.id) } label: { assetLabel(asset) }
+                // 移动整页：推入详情（docs/mobile-layout.md §3.4 左滑删除）
+                NavigationLink { AssetDetailView(assetID: asset.id) } label: { label }
             }
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) { Task { await store.deleteAsset(id: asset.id) } }
-                label: { Label("删除", systemImage: "trash") }
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            Button { balanceTarget = asset } label: { Label(Copy.adjustBalance, systemImage: "arrow.triangle.2.circlepath") }
-                .tint(.accentBrand)
-        }
+        .background(
+            selected || store.highlightID == asset.id
+                ? AnyShapeStyle(Color.brandSoft) : AnyShapeStyle(.clear)
+        )
         .contextMenu {
-            Button { balanceTarget = asset } label: { Label(Copy.adjustBalance, systemImage: "arrow.triangle.2.circlepath") }
-            Button { renameTarget = asset } label: { Label(Copy.rename, systemImage: "pencil") }
-            Button(role: .destructive) { Task { await store.deleteAsset(id: asset.id) } }
-                label: { Label("删除", systemImage: "trash") }
+            Button { router.modal = .adjustBalance(asset) } label: { Label(Copy.adjustBalance, image: "ic-refresh") }
+            Button { router.modal = .renameAsset(asset) } label: { Label(Copy.rename, image: "ic-info") }
+            Button(role: .destructive) {
+                Task { await store.deleteAsset(id: asset.id) }
+            } label: { Label(Copy.delete, image: "ic-trash") }
         }
-        .listRowBackground(store.highlightID == asset.id || selectedAssetID == asset.id ? Color.accentSoft : Color.cardSurface)
-        .listRowSeparatorTint(Color.hairline)
         .disabled(store.isWorking)
-    }
-
-    private func assetLabel(_ asset: AssetRecord) -> some View {
-        let count = store.ledger.history.filter { $0.assetId == asset.id }.count
-        return HStack(alignment: .top, spacing: 10) {
-            CategoryChip(code: asset.categoryCode, size: 32)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(asset.name).font(.subheadline.weight(.medium))
-                    .foregroundStyle(Color.ink).fixedSize(horizontal: false, vertical: true)
-                Text("历史 \(count) 条 · 更新于 \(Fmt.day(String(asset.updatedAt.prefix(10))))")
-                    .font(.caption).foregroundStyle(Color.inkMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-                MoneyText(cents: asset.amountCents, currency: "CNY", font: .subheadline.weight(.semibold))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 7)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Copy.a11yAsset(asset.name, category: Copy.categoryName(asset.categoryCode),
-                                          amount: Fmt.money(asset.amountCents, "CNY"), historyCount: count)
-                            + "，更新于" + Fmt.day(String(asset.updatedAt.prefix(10))))
+        .accessibilityIdentifier("asset-row-" + asset.name)
+
+        return Group {
+            if selectionMode {
+                row
+            } else {
+                SwipeableRow(specs: [
+                    SwipeActionSpec(icon: "ic-trash", title: Copy.delete) {
+                        Task { await store.deleteAsset(id: asset.id) }
+                    },
+                ]) {
+                    row
+                }
+            }
+        }
     }
 }
 
-// MARK: - 资产详情（历史与修正）
+// MARK: - 右栏（桌面/iPad：概览或详情）
+
+struct AssetsDetailPane: View {
+    let selectedAssetID: String?
+
+    var body: some View {
+        if let id = selectedAssetID {
+            AssetDetailView(assetID: id, inSplit: true)
+        } else {
+            AssetsOverviewPane()
+        }
+    }
+}
+
+/// 未选中时的总资产概览（§9.3 右栏未选中态）。
+struct AssetsOverviewPane: View {
+    @Environment(SnowFoldStore.self) private var store
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(Copy.totalAssets)
+                    .font(Ds.bodyMedium())
+                    .foregroundStyle(Color.text2)
+                FocusAmountText(cents: store.overview?.totalAssetsCents ?? 0, level: .page)
+                    .padding(.bottom, 12)
+                HStack(alignment: .top, spacing: 32) {
+                    stat(Copy.totalDebt, Fmt.money(store.overview?.totalDebtCents ?? 0, "CNY"), color: .neg)
+                    stat(Copy.netAssets, Fmt.money(store.overview?.netAssetsCents ?? 0, "CNY"), color: .ink)
+                    stat(Copy.recordsLabel, "\(store.ledger.assets.count) 项", color: .ink)
+                }
+                .padding(.bottom, 24)
+                if let overview = store.overview {
+                    let assets = overview.categories.filter { !$0.isLiability }
+                    let total = overview.totalAssetsCents
+                    Card {
+                        VStack(spacing: 0) {
+                            ForEach(Array(assets.enumerated()), id: \.element.code) { index, category in
+                                if index > 0 {
+                                    Rectangle().fill(Color.sep).frame(height: 1).padding(.leading, 16)
+                                }
+                                HStack(alignment: .center, spacing: 12) {
+                                    CategoryChip(code: category.code, size: 28)
+                                    Text(Copy.categoryName(category.code))
+                                        .font(Ds.bodyMedium())
+                                        .foregroundStyle(Color.ink)
+                                    Spacer(minLength: 12)
+                                    MoneyText(cents: category.amountCents, currency: "CNY", font: Ds.bodyMedium())
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.top, 10)
+                                let percent = total > 0 ? Double(category.amountCents) / Double(total) * 100 : 0
+                                HStack(alignment: .center, spacing: 8) {
+                                    PercentBar(percent: percent, color: Color.categoryColor(category.code))
+                                        .frame(maxWidth: .infinity)
+                                    Text(Fmt.percent(percent))
+                                        .font(Ds.aux())
+                                        .monospacedDigit()
+                                        .foregroundStyle(Color.text2)
+                                        .frame(width: 44, alignment: .trailing)
+                                }
+                                .padding(.leading, 56)
+                                .padding(.trailing, 16)
+                                .padding(.bottom, 10)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+            }
+            .padding(.top, 4)
+            .padding(.bottom, 24)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func stat(_ label: String, _ value: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(Ds.aux()).foregroundStyle(Color.text2)
+            Text(value)
+                .font(Ds.bodyMedium())
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+        }
+    }
+}
+
+// MARK: - 资产详情（§9.3 右栏选中态 / 移动推入页）
 
 struct AssetDetailView: View {
     let assetID: String
-    var onDelete: (() -> Void)? = nil
+    var inSplit = false
     @Environment(\.dismiss) private var dismiss
     @Environment(SnowFoldStore.self) private var store
-    @State private var renameTarget: AssetRecord?
-    @State private var balanceTarget: AssetRecord?
-    @State private var correctionTarget: HistoryRecord?
+    @Environment(Router.self) private var router
+    @State private var expandedCorrections: Set<String> = []
 
     private var asset: AssetRecord? {
         store.ledger.assets.first { $0.id == assetID }
@@ -192,167 +325,202 @@ struct AssetDetailView: View {
     }
 
     var body: some View {
-        Group {
+        ScrollView {
             if let asset {
-                content(asset)
+                detail(asset)
+                    .padding(.horizontal, inSplit || Ds.isDesktop ? 0 : 16)
+                    .padding(.top, inSplit ? 0 : 8)
+                    .padding(.bottom, 24)
             } else {
-                EmptyStateView(
-                    icon: "questionmark.circle",
-                    title: Copy.message(for: .NotFound),
-                    message: "该资产可能已被删除。"
-                )
+                EmptyStateView(icon: "ic-wallet", title: Copy.message(for: .NotFound),
+                               message: "该资产可能已被删除。")
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(Color.canvas)
+        .background(Color.bg)
         .navigationTitle(asset?.name ?? Copy.assetsTitle)
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-        .sheet(item: $renameTarget) { target in
-            AssetEditorSheet(mode: .rename(target))
-        }
-        .sheet(item: $balanceTarget) { target in
-            AssetEditorSheet(mode: .balance(target))
-        }
-        .onChange(of: store.syncGeneration) { _, _ in
-            if asset == nil { renameTarget = nil; balanceTarget = nil }
-            if let target = correctionTarget, !store.ledger.history.contains(where: { $0.id == target.id }) {
-                correctionTarget = nil
-            }
-        }
-        .sheet(item: $correctionTarget) { record in
-            HistoryCorrectionSheet(history: record, assetName: asset?.name ?? "")
-        }
+        .phoneInlineTitle()
     }
 
-    @ViewBuilder
-    private func content(_ asset: AssetRecord) -> some View {
-        List {
-            Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(asset.name)
-                        .font(.title3.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 8) {
-                        CategoryChip(code: asset.categoryCode, size: 24)
-                        Text(Copy.categoryName(asset.categoryCode))
-                            .font(.footnote)
-                            .foregroundStyle(Color.inkMuted)
-                    }
-                    MoneyText(cents: asset.amountCents, currency: "CNY", font: .title.weight(.semibold))
-                    VStack(spacing: 10) {
-                        Button {
-                            balanceTarget = asset
-                        } label: {
-                            Label(Copy.adjustBalance, systemImage: "arrow.triangle.2.circlepath")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(InkButtonStyle())
-                        .disabled(store.isWorking)
-                        Button {
-                            renameTarget = asset
-                        } label: {
-                            Label(Copy.rename, systemImage: "pencil")
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-                .padding(.vertical, 8)
+    private func detail(_ asset: AssetRecord) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 8) {
+                CategoryChip(code: asset.categoryCode, size: 24)
+                Text(Copy.categoryName(asset.categoryCode))
+                    .font(Ds.aux())
+                    .foregroundStyle(Color.text2)
             }
-            historySection(asset)
-            Section {
-                Button("删除这项资产", role: .destructive) {
-                    Task {
-                        await store.deleteAsset(id: asset.id)
-                        if !store.ledger.assets.contains(where: { $0.id == asset.id }) {
-                            if let onDelete { onDelete() } else { dismiss() }
-                        }
-                    }
-                }
-                .disabled(store.isWorking)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func historySection(_ asset: AssetRecord) -> some View {
-        Section {
-            if history.isEmpty {
-                Text(Copy.historyInitial)
-                    .font(.footnote)
-                    .foregroundStyle(Color.ink3)
-            }
-            ForEach(history.reversed(), id: \.id) { record in
-                HistoryRowView(
-                    record: record,
-                    previous: history.first { $0.id == record.previousId },
-                    isCurrent: record.id == asset.currentHistoryId,
-                    onCorrect: { correctionTarget = record }
-                )
-            }
-        } header: {
-            Text(Copy.historyTitle)
-                .font(.footnote.weight(.semibold))
-        }
-    }
-}
-
-/// 单条快照：时间与增量、当前余额、修正入口与改前改后记录。
-struct HistoryRowView: View {
-    let record: HistoryRecord
-    let previous: HistoryRecord?
-    let isCurrent: Bool
-    let onCorrect: () -> Void
-    @Environment(SnowFoldStore.self) private var store
-    @State private var corrections: [HistoryCorrectionRecord] = []
-    @State private var expanded = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .top, spacing: 8) {
-                Text(Fmt.timestamp(record.recordedAt))
-                    .font(.footnote).monospacedDigit().foregroundStyle(Color.inkMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-                if isCurrent {
-                    Text(Copy.historyCurrent).font(.caption2.weight(.medium))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.accentSoft, in: Capsule()).foregroundStyle(Color.accentBrand)
-                }
-            }
-            MoneyText(cents: record.amountCents, currency: "CNY", font: .subheadline.weight(.semibold))
-            Text(deltaText).font(.caption).monospacedDigit()
-                .foregroundStyle(previous.map { record.amountCents >= $0.amountCents ? Color.positiveBrand : Color.negativeBrand } ?? Color.inkMuted)
+            .padding(.bottom, 8)
+            Text(asset.name)
+                .font(Ds.sectionTitle())
+                .foregroundStyle(Color.ink)
                 .fixedSize(horizontal: false, vertical: true)
-            Button(Copy.correctHistory, action: onCorrect)
-                .font(.footnote.weight(.medium)).buttonStyle(.borderless)
-                .frame(minHeight: 44)
-            if !corrections.isEmpty {
-                DisclosureGroup("修正记录（\(corrections.count)）", isExpanded: $expanded) {
-                    ForEach(corrections, id: \.id) { correction in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(Fmt.timestamp(correction.recordedAt)).font(.caption2).foregroundStyle(Color.inkMuted)
-                            Text("\(Fmt.money(correction.previousAmountCents, "CNY")) → \(Fmt.money(correction.amountCents, "CNY"))")
-                                .font(.caption).monospacedDigit().fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .font(.caption)
-            }
+                .padding(.bottom, 4)
+            FocusAmountText(cents: asset.amountCents, level: .page)
+                .padding(.bottom, 8)
+            Text(Copy.assetMeta(
+                date: Fmt.day(String(asset.updatedAt.prefix(10))),
+                historyCount: history.count
+            ))
+            .font(Ds.aux())
+            .monospacedDigit()
+            .foregroundStyle(Color.text2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, 16)
+            actionRow(asset)
+                .padding(.bottom, 28)
+            historySection(asset)
         }
-        .padding(.vertical, 5)
-        .accessibilityElement(children: .contain)
-        .task(id: "\(record.id)-\(record.amountCents)-\(store.syncGeneration)") {
-            do { corrections = try await store.historyCorrections(historyID: record.id) }
-            catch { store.showNotice(Copy.message(for: error)) }
+        .accessibilityIdentifier("asset-detail")
+    }
+
+    private func actionRow(_ asset: AssetRecord) -> some View {
+        HStack(spacing: 8) {
+            Button(Copy.adjustBalance) {
+                router.modal = .adjustBalance(asset)
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .disabled(store.isWorking)
+            .accessibilityIdentifier("adjust-balance")
+            Button(Copy.rename) {
+                router.modal = .renameAsset(asset)
+            }
+            .buttonStyle(SecondaryButtonStyle())
+            .disabled(store.isWorking)
+            Spacer(minLength: 12)
+            Button {
+                Task {
+                    await store.deleteAsset(id: asset.id)
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    AppIcon(name: "ic-trash", size: 16)
+                    Text(Copy.delete)
+                }
+            }
+            .buttonStyle(TextButtonStyle(danger: true))
+            .disabled(store.isWorking)
         }
     }
 
-    private var deltaText: String {
+    private func historySection(_ asset: AssetRecord) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: Copy.historySection, count: history.count) {
+                Text(Copy.historyNote)
+                    .font(Ds.aux())
+                    .foregroundStyle(Color.text2)
+            }
+            Card {
+                if history.isEmpty {
+                    Text(Copy.historyInitial)
+                        .font(Ds.body())
+                        .foregroundStyle(Color.text2)
+                        .padding(16)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(history.reversed().enumerated()), id: \.element.id) { index, record in
+                            if index > 0 {
+                                Rectangle().fill(Color.sep).frame(height: 1).padding(.leading, 16)
+                            }
+                            historyRow(record, isCurrent: record.id == asset.currentHistoryId)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+    }
+
+    private func historyRow(_ record: HistoryRecord, isCurrent: Bool) -> some View {
+        let previous = history.first { $0.id == record.previousId }
+        return HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(Fmt.timestamp(record.recordedAt))
+                    .font(Ds.body())
+                    .monospacedDigit()
+                    .foregroundStyle(Color.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    if isCurrent {
+                        TagBadge(text: Copy.historyCurrent, kind: .brand)
+                    }
+                    Text(deltaText(record, previous: previous))
+                        .font(Ds.aux())
+                        .monospacedDigit()
+                        .foregroundStyle(previous == nil ? Color.text2
+                                         : (record.amountCents >= (previous?.amountCents ?? 0) ? Color.text2 : Color.text2))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !corrections(for: record).isEmpty {
+                    DisclosureGroup(isExpanded: binding(for: record)) {
+                        ForEach(corrections(for: record)) { correction in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(Fmt.timestamp(correction.recordedAt))
+                                    .font(Ds.aux())
+                                    .monospacedDigit()
+                                    .foregroundStyle(Color.text2)
+                                Text("\(Fmt.money(correction.previousAmountCents, "CNY")) → \(Fmt.money(correction.amountCents, "CNY"))")
+                                    .font(Ds.aux())
+                                    .monospacedDigit()
+                                    .foregroundStyle(Color.ink)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    } label: {
+                        Text("修正记录（\(corrections(for: record).count)）")
+                            .font(Ds.aux())
+                            .foregroundStyle(Color.text2)
+                    }
+                    .tint(.brand)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 12)
+            VStack(alignment: .trailing, spacing: 4) {
+                MoneyText(cents: record.amountCents, currency: "CNY", font: Ds.bodyMedium())
+                Button(Copy.correctHistory) {
+                    router.modal = .correctHistory(record, assetName: asset?.name ?? "")
+                }
+                .buttonStyle(TextButtonStyle())
+                .frame(minHeight: 44)
+                .disabled(store.isWorking)
+                .accessibilityIdentifier("correct-" + record.id)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .task(id: record.id) {
+            await loadCorrections(record)
+        }
+    }
+
+    // 修正记录：按需从核心读取（界面不落库）。
+    @State private var correctionsCache: [String: [HistoryCorrectionRecord]] = [:]
+
+    private func corrections(for record: HistoryRecord) -> [HistoryCorrectionRecord] {
+        correctionsCache[record.id] ?? []
+    }
+
+    private func binding(for record: HistoryRecord) -> Binding<Bool> {
+        Binding(
+            get: { expandedCorrections.contains(record.id) },
+            set: { expanded in
+                if expanded { expandedCorrections.insert(record.id) } else { expandedCorrections.remove(record.id) }
+            }
+        )
+    }
+
+    private func loadCorrections(_ record: HistoryRecord) async {
+        guard correctionsCache[record.id] == nil else { return }
+        do {
+            correctionsCache[record.id] = try await store.historyCorrections(historyID: record.id)
+        } catch {
+            store.showErrorNotice(Copy.message(for: error))
+        }
+    }
+
+    private func deltaText(_ record: HistoryRecord, previous: HistoryRecord?) -> String {
         guard let previous else { return Copy.historyInitial }
         let delta = record.amountCents - previous.amountCents
-        let sign = delta > 0 ? "+" : ""
-        return "\(sign)\(Fmt.money(delta, "CNY"))"
+        return Fmt.money(delta, "CNY")
     }
 }
