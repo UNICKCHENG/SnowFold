@@ -106,6 +106,7 @@ struct MobileSheetScaffold<Content: View>: View {
 /// 弹层内标签（桌面右对齐 88 宽）。
 struct DialogLabel: View {
     let text: String
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         Text(text)
@@ -114,7 +115,7 @@ struct DialogLabel: View {
             #if os(macOS)
             .frame(width: 88, alignment: .trailing)
             #else
-            .frame(width: 96, alignment: .leading)
+            .frame(width: typeSize.isAccessibilitySize ? nil : 96, alignment: .leading)
             #endif
     }
 }
@@ -141,7 +142,7 @@ struct AmountFieldRow: View {
                 .modifier(DSInputStyle(focused: $focused))
         }
         .onAppear {
-            if autoFocus { focused = true }
+            if autoFocus && !EditorCapture.requested("-SNOWFOLD_SHOT_HIDE_KEYBOARD") { focused = true }
         }
     }
 }
@@ -157,7 +158,7 @@ struct TextFieldRow: View {
             .font(Ds.body())
             .focused($focused)
             .modifier(DSInputStyle(focused: $focused))
-            .onAppear { focused = true }
+            .onAppear { focused = !EditorCapture.requested("-SNOWFOLD_SHOT_HIDE_KEYBOARD") }
     }
 }
 
@@ -210,7 +211,13 @@ struct AssetEditorSheet: View {
 
     var body: some View {
         editorBody
-            .onAppear(perform: prefill)
+            .task {
+                prefill()
+                if EditorCapture.requested("-SNOWFOLD_SHOT_FORM_ERROR") {
+                    amount = "12.345"
+                    await save()
+                }
+            }
             .sensoryFeedback(.selection, trigger: selectedCategory)
     }
 
@@ -353,6 +360,7 @@ struct AssetEditorSheet: View {
 
     private var symbol: String { "¥" }
 
+    @ViewBuilder
     private var formCard: some View {
         Card {
             VStack(spacing: 0) {
@@ -446,8 +454,8 @@ struct AssetEditorSheet: View {
         switch mode {
         case .new(let categoryCode):
             selectedCategory = categoryCode
-            name = ""
-            amount = ""
+            name = EditorCapture.requested("-SNOWFOLD_SHOT_PREFILL") ? "招商银行 储蓄卡" : ""
+            amount = EditorCapture.requested("-SNOWFOLD_SHOT_PREFILL") ? "86450.32" : ""
         case .rename(let asset):
             name = asset.name
         case .balance(let asset):
@@ -507,7 +515,13 @@ struct HistoryCorrectionSheet: View {
 
     var body: some View {
         editorBody
-            .onAppear { amount = Fmt.decimal(history.amountCents) }
+            .task {
+                amount = Fmt.decimal(history.amountCents)
+                if EditorCapture.requested("-SNOWFOLD_SHOT_FORM_ERROR") {
+                    amount = "12.345"
+                    await save()
+                }
+            }
     }
 
     @ViewBuilder
@@ -636,7 +650,13 @@ struct SubscriptionEditorSheet: View {
 
     var body: some View {
         editorBody
-            .onAppear(perform: prefill)
+            .task {
+                prefill()
+                if EditorCapture.requested("-SNOWFOLD_SHOT_FORM_ERROR") {
+                    amount = "12.345"
+                    await save()
+                }
+            }
     }
 
     @ViewBuilder
@@ -841,6 +861,10 @@ struct SubscriptionEditorSheet: View {
     private func prefill() {
         switch mode {
         case .new:
+            if EditorCapture.requested("-SNOWFOLD_SHOT_PREFILL") {
+                name = "Netflix"
+                amount = "89.99"
+            }
             chargeDate = Date()
             currency = "CNY"
             cycle = "monthly"
@@ -906,6 +930,17 @@ struct SubscriptionEditorSheet: View {
         router.modal = nil
         #else
         dismiss()
+        #endif
+    }
+}
+
+/// 仅验收构建启用的草稿参数；错误截图仍调用真实保存入口与核心校验。
+private enum EditorCapture {
+    static func requested(_ flag: String) -> Bool {
+        #if DEBUG || ACCEPTANCE
+        CommandLine.arguments.contains(flag)
+        #else
+        false
         #endif
     }
 }

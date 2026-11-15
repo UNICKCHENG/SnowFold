@@ -371,6 +371,7 @@ struct EmptyStateView: View {
     var message: String? = nil
     var actionTitle: String? = nil
     var actionIcon: String? = nil
+    var actionIdentifier = "empty-action"
     var action: (() -> Void)? = nil
 
     var body: some View {
@@ -405,7 +406,7 @@ struct EmptyStateView: View {
                     }
                 }
                 .buttonStyle(PrimaryButtonStyle())
-                .accessibilityIdentifier("empty-action")
+                .accessibilityIdentifier(actionIdentifier)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -498,6 +499,7 @@ struct SwipeableRow<Content: View>: View {
                 }
             }
             content()
+                .background(Color.cardBg)
                 .offset(x: offset)
                 .simultaneousGesture(swipe)
                 .background(
@@ -517,6 +519,12 @@ struct SwipeableRow<Content: View>: View {
             }
             .onEnded { value in
                 let width = value.translation.width
+                guard abs(width) > abs(value.translation.height) else { reset(); return }
+                if width < -240, let action = specs.first {
+                    reset()
+                    action.perform()
+                    return
+                }
                 withAnimation(.easeOut(duration: 0.2)) {
                     if width < -160 {
                         offset = -CGFloat(specs.count * 88) // 一滑到底保持全开

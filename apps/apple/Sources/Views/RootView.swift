@@ -141,19 +141,19 @@ struct RootView: View {
     private var readyContent: some View {
         #if os(iOS)
         if UIDevice.current.userInterfaceIdiom == .pad, sizeClass == .regular {
-            SplitRootView()
+            SplitRootView().environment(\.usesWideLayout, true)
         } else {
-            PhoneRootView()
+            PhoneRootView().environment(\.usesWideLayout, false)
         }
         #else
-        SplitRootView()
+        SplitRootView().environment(\.usesWideLayout, true)
         #endif
     }
 
     /// 验收截图钩子（DEBUG 或显式 ACCEPTANCE 条件；见 AcceptanceCapture）。
     @MainActor
     private func handleShotHooks() async {
-        #if (DEBUG || ACCEPTANCE) && os(macOS)
+        #if DEBUG || ACCEPTANCE
         guard store.state == .ready else { return }
         let arguments = CommandLine.arguments
         func value(_ flag: String) -> String? {
@@ -181,11 +181,13 @@ struct RootView: View {
             // 变动一次余额触发真实撤销横幅（临时数据目录，不影响任何真实库）。
             try? await store.changeBalance(id: asset.id, amountText: Fmt.decimal(asset.amountCents + 123_45))
         }
+        #if os(macOS)
         if let tab = value("-SNOWFOLD_SHOT_OPEN_SETTINGS") {
             router.settingsTab = MacSettingsTab(rawValue: tab) ?? .general
             await Task.yield()
             openSettings()
         }
+        #endif
         #endif
     }
 }
@@ -299,13 +301,23 @@ struct ModalSheet: View {
     }
 }
 
+/// 由根布局注入的窗口级形态，避免 iPad 分栏内的 compact 尺寸误判。
+private struct WideLayoutKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var usesWideLayout: Bool {
+        get { self[WideLayoutKey.self] }
+        set { self[WideLayoutKey.self] = newValue }
+    }
+}
+
 /// 工具栏动作只在手机形态挂载（iPad/Mac 由分栏容器统一挂载，避免重复按钮）。
 struct PhoneOnlyToolbar<Actions: View>: ViewModifier {
     @ViewBuilder var actions: () -> Actions
+    @Environment(\.usesWideLayout) private var wide
 
     func body(content: Content) -> some View {
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .pad {
+        if wide {
             content
         } else {
             content.toolbar { ToolbarItem(placement: .topBarTrailing) { actions() } }
@@ -317,9 +329,10 @@ struct PhoneOnlyToolbar<Actions: View>: ViewModifier {
 }
 
 struct PhoneOnlyInlineTitle: ViewModifier {
+    @Environment(\.usesWideLayout) private var wide
     func body(content: Content) -> some View {
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .pad {
+        if wide {
             content
         } else {
             content.navigationBarTitleDisplayMode(.inline)
@@ -356,6 +369,9 @@ struct SplitRootView: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.colorScheme) private var colorScheme
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
     @State private var selectedAssetID: String?
     @State private var assetListScrollTo: String?
 
@@ -367,7 +383,15 @@ struct SplitRootView: View {
             detail
         }
         .modifier(SplitModalPresenter())
-        .onChange(of: store.syncGeneration) { _, _ in
+        .focusedSceneValue(\.appActions, AppActions(
+            newMixed: {
+                router.modal = router.tab == .subscriptions ? .newSubscription : .newAsset(categoryCode: "cash")
+            },
+            newSubscription: { router.modal = .newSubscription },
+            undo: { Task { await store.undoNow() } },
+            selectTab: { router.tab = $0 }
+        ))
+        .onChange(of: store.ledger.assets.map(\.id)) { _, _ in
             if let id = selectedAssetID, !store.ledger.assets.contains(where: { $0.id == id }) {
                 selectedAssetID = nil
             }
@@ -389,7 +413,7 @@ struct SplitRootView: View {
             #endif
             VStack(spacing: 2) {
                 sidebarRow(.overview, icon: "ic-pie-chart", title: Copy.overviewTitle)
-                sidebarRow(.assets, icon: "ic-wallet", title: Copy.assetsTitle)
+                sidebarRow(.assets, icon: "ic-wallet", title: Copy.assetsTab)
                 sidebarRow(.subscriptions, icon: "ic-calendar-repeat", title: Copy.subscriptionsTitle)
             }
             Spacer(minLength: 12)
@@ -413,7 +437,13 @@ struct SplitRootView: View {
     private func sidebarRow(_ tab: Router.Tab, icon: String, title: String) -> some View {
         let selected = router.tab == tab
         return Button {
-            withAnimation(.easeOut(duration: 0.15)) { router.tab = tab }
+            #if os(macOS)
+            if tab == .settings {
+                openSettings()
+                return
+            }
+            #endif
+            router.tab = tab
         } label: {
             HStack(spacing: Ds.isDesktop ? 10 : 12) {
                 AppIcon(name: icon, size: Ds.isDesktop ? 20 : 24, fill: selected)
@@ -470,16 +500,10 @@ struct AssetsSplitView: View {
     @Binding var scrollTo: String?
 
     var body: some View {
+        // design.md §9.3：未选中时右栏显示总资产概览，点条目后才进入详情。
         columns
-            // 自动选中首项：数据载入后且当前无选中（审计 #14 的时机缺陷在此修复）。
-            .onChange(of: store.ledger) { _, ledger in
-                if selectedAssetID == nil, let first = ledger.assets.first {
-                    selectedAssetID = first.id
-                }
-            }
-            .task {
-                if selectedAssetID == nil { selectedAssetID = store.ledger.assets.first?.id }
-            }
+            .navigationTitle(Copy.assetsTitle)
+            .background(Color.bg)
     }
 
     @ViewBuilder
@@ -565,7 +589,7 @@ struct SplitModalPresenter: ViewModifier {
                     }
                 }
             }
-            .animation(.easeOut(duration: 0.15), value: router.modal)
+            .animation(.easeOut(duration: 0.15), value: router.modal?.id)
         #else
         content
             .sheet(item: Binding(

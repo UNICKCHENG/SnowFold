@@ -3,11 +3,24 @@ import SwiftUI
 // MARK: - 资产页（iPhone 推入形态；iPad/Mac 用 AssetsSplitView）
 
 struct AssetsView: View {
+    @Environment(SnowFoldStore.self) private var store
+    @Environment(Router.self) private var router
+
     var body: some View {
-        AssetsListView(selectedAssetID: .constant(nil as String?), scrollTo: .constant(nil as String?))
-            .navigationTitle(Copy.assetsTitle)
-            .phoneInlineTitle()
-            .phoneToolbar { PageToolbarActions() }
+        Group {
+            if store.ledger.assets.isEmpty {
+                EmptyStateView(icon: "ic-wallet", title: Copy.assetsEmptyTitle, message: Copy.assetsEmptyHelp,
+                               actionTitle: Copy.addAsset, actionIdentifier: "add-empty-cash") {
+                    router.modal = .newAsset(categoryCode: "cash")
+                }
+                .background(Color.bg)
+            } else {
+                AssetsListView(selectedAssetID: .constant(nil as String?), scrollTo: .constant(nil as String?))
+            }
+        }
+        .navigationTitle(Copy.assetsTitle)
+        .phoneInlineTitle()
+        .phoneToolbar { PageToolbarActions() }
     }
 }
 
@@ -18,6 +31,7 @@ struct AssetsListView: View {
     @Environment(Router.self) private var router
     @Binding var selectedAssetID: String?
     @Binding var scrollTo: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// 分栏形态：点行选中右栏；移动整页：推入详情。
     var selectionMode = false
     var showsSummary = true
@@ -158,7 +172,10 @@ struct AssetsListView: View {
 
     private func assetRow(_ asset: AssetRecord) -> some View {
         let selected = selectedAssetID == asset.id
-        let label = HStack(alignment: .center, spacing: 12) {
+        let rowLayout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        let label = rowLayout {
             VStack(alignment: .leading, spacing: 2) {
                 Text(asset.name)
                     .font(Ds.body())
@@ -311,6 +328,7 @@ struct AssetsOverviewPane: View {
 struct AssetDetailView: View {
     let assetID: String
     var inSplit = false
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.dismiss) private var dismiss
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
@@ -337,8 +355,11 @@ struct AssetDetailView: View {
             }
         }
         .background(Color.bg)
-        .navigationTitle(asset?.name ?? Copy.assetsTitle)
+        .navigationTitle(Copy.assetsTitle)
         .phoneInlineTitle()
+        .onChange(of: asset?.id) { _, id in
+            if id == nil && !inSplit { dismiss() }
+        }
     }
 
     private func detail(_ asset: AssetRecord) -> some View {
@@ -374,7 +395,10 @@ struct AssetDetailView: View {
     }
 
     private func actionRow(_ asset: AssetRecord) -> some View {
-        HStack(spacing: 8) {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+        return layout {
             Button(Copy.adjustBalance) {
                 router.modal = .adjustBalance(asset)
             }
@@ -446,8 +470,7 @@ struct AssetDetailView: View {
                     Text(deltaText(record, previous: previous))
                         .font(Ds.aux())
                         .monospacedDigit()
-                        .foregroundStyle(previous == nil ? Color.text2
-                                         : (record.amountCents >= (previous?.amountCents ?? 0) ? Color.text2 : Color.text2))
+                        .foregroundStyle(Color.text2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if !corrections(for: record).isEmpty {
@@ -488,7 +511,7 @@ struct AssetDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .task(id: record.id) {
+        .task(id: "\(record.id)-\(record.amountCents)-\(store.syncGeneration)") {
             await loadCorrections(record)
         }
     }
@@ -510,7 +533,6 @@ struct AssetDetailView: View {
     }
 
     private func loadCorrections(_ record: HistoryRecord) async {
-        guard correctionsCache[record.id] == nil else { return }
         do {
             correctionsCache[record.id] = try await store.historyCorrections(historyID: record.id)
         } catch {
@@ -521,6 +543,6 @@ struct AssetDetailView: View {
     private func deltaText(_ record: HistoryRecord, previous: HistoryRecord?) -> String {
         guard let previous else { return Copy.historyInitial }
         let delta = record.amountCents - previous.amountCents
-        return Fmt.money(delta, "CNY")
+        return (delta > 0 ? "+" : "") + Fmt.money(delta, "CNY")
     }
 }

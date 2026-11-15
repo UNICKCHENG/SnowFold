@@ -6,6 +6,7 @@ struct OverviewView: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.usesWideLayout) private var wide
     #if os(macOS)
     @Environment(\.openSettings) private var openSettings
     #endif
@@ -44,7 +45,7 @@ struct OverviewView: View {
             VStack(alignment: .leading, spacing: 0) {
                 if store.keyUnavailable { keyUnavailableCard.padding(.bottom, 24) }
                 heroSection(overview)
-                if Ds.isDesktop && !typeSize.isAccessibilitySize {
+                if wide && !typeSize.isAccessibilitySize {
                     HStack(alignment: .top, spacing: 24) {
                         compositionSection(overview)
                         upcomingSection(overview)
@@ -151,7 +152,7 @@ struct OverviewView: View {
                 }
             }
             Card {
-                if Ds.isDesktop {
+                if wide {
                     // 桌面：五行双行宽松行（最小高 64，左缩进 56）
                     VStack(spacing: 0) {
                         ForEach(Array(assets.enumerated()), id: \.element.code) { index, category in
@@ -368,7 +369,7 @@ struct OverviewView: View {
         case .neutral: .neutral
         }
         let row = HStack(alignment: .center, spacing: 12) {
-            if Ds.isDesktop {
+            if wide {
                 SubscriptionAvatar(name: subscription.name)
             }
             VStack(alignment: .leading, spacing: 2) {
@@ -376,7 +377,6 @@ struct OverviewView: View {
                     .font(Ds.bodyMedium())
                     .foregroundStyle(Color.ink)
                     .fixedSize(horizontal: false, vertical: true)
-                    .lineLimit(2)
                 Text("\(Copy.cycleLabel(subscription.cycle)) · \(Fmt.day(subscription.nextChargeOn))")
                     .font(Ds.aux())
                     .monospacedDigit()

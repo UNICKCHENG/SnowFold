@@ -36,10 +36,11 @@ mkdir -p "$DEST"
 set +e
 RUN_FILES=("$DERIVED_DATA"/Build/Products/SnowFold-iOS-snapshots_*.xctestrun)
 mkdir -p "$APPLE_ROOT/.build/shot-results"
-TEST_RUNNER_SHOT_MODE="$MODE" xcodebuild test-without-building \
+TEST_RUNNER_SHOT_MODE="$MODE" TEST_RUNNER_SHOT_KIND="$KIND" xcodebuild test-without-building \
     -xctestrun "${RUN_FILES[0]}" -destination "id=$UDID" \
     -resultBundlePath "$APPLE_ROOT/.build/shot-results/$MODE-$(date +%H%M%S).xcresult" \
     -parallel-testing-enabled NO -only-testing:"SnowFoldSnapshots-iOS/SnapshotTours/$TOUR" \
+    -only-testing:"SnowFoldSnapshots-iOS/SnapshotTours/testScreenMatrix" \
     > "$APPLE_ROOT/.build/shots-$MODE.log" 2>&1
 result=$?
 set -e

@@ -21,8 +21,9 @@ final class SnapshotTours: XCTestCase {
 
     private func snap(_ name: String) {
         do {
-            try XCUIScreen.main.screenshot().pngRepresentation
-                .write(to: outputDirectory.appendingPathComponent("\(mode)-\(name).png"))
+            // iPad 按窗口方向截图，避免 XCUIScreen 把横屏像素写成旋转的竖图。
+            let image = isTablet ? XCUIApplication().windows.firstMatch.screenshot() : XCUIScreen.main.screenshot()
+            try image.pngRepresentation.write(to: outputDirectory.appendingPathComponent("\(mode)-\(name).png"))
         } catch { XCTFail("截图写入失败：\(error)") }
     }
 
@@ -50,8 +51,10 @@ final class SnapshotTours: XCTestCase {
         }
         XCTAssertTrue(item.waitForExistence(timeout: 8), "导航入口缺失：\(tab)")
         item.tap()
-        XCTAssertTrue(element(containing: marker, app: app).waitForExistence(timeout: 8),
-                      "页面焦点未出现：\(marker)")
+        let emptyMarker = ["overview": "还没有记录", "assets": "还没有资产", "subscriptions": "还没有订阅"][tab] ?? marker
+        XCTAssertTrue(element(containing: marker, app: app).waitForExistence(timeout: 4)
+                      || app.staticTexts[emptyMarker].firstMatch.waitForExistence(timeout: 4),
+                      "页面未出现预期的内容或空状态：\(marker)")
     }
 
     private func element(containing text: String, app: XCUIApplication) -> XCUIElement {
@@ -102,6 +105,54 @@ final class SnapshotTours: XCTestCase {
             reveal(key, app: app, scrollID: "settings-key")
         }
         snap("settings-key")
+    }
+
+    /// 截图矩阵与行为巡游分开：每屏重新启动真实应用，避免一条导航失败丢失后续屏。
+    func testScreenMatrix() {
+        continueAfterFailure = true
+        let kind = ProcessInfo.processInfo.environment["SHOT_KIND"] ?? "long"
+        let app = XCUIApplication()
+        for tab in ["overview", "assets", "subscriptions", "settings"] {
+            app.launchArguments = ["-SNOWFOLD_SHOT_TAB", tab]
+            if isTablet { XCUIDevice.shared.orientation = .landscapeLeft }
+            app.launch()
+            let marker = app.descendants(matching: .any).matching(identifier: "nav-" + tab).firstMatch
+            _ = marker.waitForExistence(timeout: 10)
+            snap("matrix-" + kind + "-" + tab)
+            if tab == "settings" {
+                for page in 1...3 {
+                    app.swipeUp()
+                    snap("matrix-settings-page-\(page)")
+                }
+                let clear = app.buttons["clear-all"].firstMatch
+                app.swipeDown()
+                app.swipeDown()
+                if clear.waitForExistence(timeout: 4), clear.isHittable {
+                    clear.tap()
+                    _ = app.buttons["取消"].firstMatch.waitForExistence(timeout: 4)
+                    snap("matrix-confirm-clear")
+                }
+            }
+            app.terminate()
+        }
+        let dialogs = kind == "empty" ? ["asset", "sub-new"] : ["asset", "adjust", "correct", "sub-new", "sub-edit"]
+        for dialog in dialogs {
+            app.launchArguments = ["-SNOWFOLD_SHOT_TAB", dialog.hasPrefix("sub") ? "subscriptions" : "assets",
+                                   "-SNOWFOLD_SHOT_DIALOG", dialog, "-SNOWFOLD_SHOT_HIDE_KEYBOARD", "-SNOWFOLD_SHOT_PREFILL"]
+            app.launch()
+            let cancel = app.buttons["取消"].firstMatch
+            XCTAssertTrue(cancel.waitForExistence(timeout: 12), "弹层未打开：\(dialog)")
+            snap("matrix-dialog-" + dialog)
+            app.terminate()
+            if dialog != "sub-edit" {
+                app.launchArguments.append("-SNOWFOLD_SHOT_FORM_ERROR")
+                app.launch()
+                let error = app.descendants(matching: .any).matching(identifier: "editor-error").firstMatch
+                XCTAssertTrue(error.waitForExistence(timeout: 12), "错误未就地显示：\(dialog)")
+                snap("matrix-dialog-" + dialog + "-error")
+                app.terminate()
+            }
+        }
     }
 
     // MARK: 长数据巡游

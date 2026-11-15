@@ -50,10 +50,10 @@ struct SnowFoldApp: App {
             ))
         }
         #endif
-        #if os(macOS)
+        #if DEBUG || ACCEPTANCE
         let arguments = CommandLine.arguments
         if let index = arguments.firstIndex(of: "-SNOWFOLD_SHOT_TAB"), index + 1 < arguments.count,
-           let tab = Router.Tab(rawValue: arguments[index + 1]), tab != .settings {
+           let tab = Router.Tab(rawValue: arguments[index + 1]) {
             initialRouter.tab = tab
         }
         #endif
@@ -67,6 +67,7 @@ struct SnowFoldApp: App {
         #if os(macOS)
         WindowGroup("SnowFold") {
             RootView()
+                .tint(.brand)
                 .frame(minWidth: 900, minHeight: 600)
         }
         .windowResizability(.contentMinSize)
@@ -81,10 +82,12 @@ struct SnowFoldApp: App {
                 .environment(store)
                 .environment(router)
                 .preferredColorScheme(store.theme.colorScheme)
+                .tint(.brand)
         }
         #else
         WindowGroup("SnowFold") {
             RootView()
+                .tint(.brand)
         }
         .environment(store)
         .environment(router)

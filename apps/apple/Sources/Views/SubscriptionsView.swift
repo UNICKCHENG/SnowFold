@@ -189,91 +189,72 @@ struct SubscriptionsView: View {
     private func subscriptionRow(_ record: SubscriptionRecord, group: SubscriptionGroup) -> some View {
         let pending = group == .overdue
         let active = record.status == "active"
-        let row = HStack(alignment: .center, spacing: 12) {
-            SubscriptionAvatar(
-                name: record.name,
-                kind: pending ? .danger : (active ? .normal : .muted)
-            )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(record.name)
-                    .font(Ds.bodyMedium())
-                    .foregroundStyle(active ? Color.ink : Color.text2)
-                    .fixedSize(horizontal: false, vertical: true)
-                if pending {
-                    Text(overdueSubtitle(record))
-                        .font(Ds.aux())
-                        .monospacedDigit()
-                        .foregroundStyle(Color.neg)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text("\(Copy.cycleLabel(record.cycle)) · \(Fmt.day(record.nextChargeOn))")
-                        .font(Ds.aux())
-                        .monospacedDigit()
-                        .foregroundStyle(Color.text2)
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        let main = layout {
+            Button { router.modal = .editSubscription(record) } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    SubscriptionAvatar(name: record.name, kind: pending ? .danger : (active ? .normal : .muted))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(record.name)
+                            .font(Ds.bodyMedium())
+                            .foregroundStyle(active ? Color.ink : Color.text2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(pending ? overdueSubtitle(record)
+                             : "\(Copy.cycleLabel(record.cycle)) · \(Fmt.day(record.nextChargeOn))")
+                            .font(Ds.aux())
+                            .monospacedDigit()
+                            .foregroundStyle(pending ? Color.neg : Color.text2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .contentShape(Rectangle())
             }
-            Spacer(minLength: 12)
-            VStack(alignment: .trailing, spacing: 6) {
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("subscription-editor-" + record.name)
+            .accessibilityLabel(Copy.a11ySubscription(
+                record.name, amount: Fmt.money(record.amountCents, record.currency),
+                cycle: Copy.cycleLabel(record.cycle), date: Fmt.day(record.nextChargeOn),
+                status: active ? "在订" : "已暂停"
+            ))
+            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
                 MoneyText(cents: record.amountCents, currency: record.currency,
                           font: Ds.bodyMedium(), color: active ? .ink : .text2)
                 if pending {
                     Button { renew(record) } label: {
                         HStack(spacing: 6) {
                             AppIcon(name: "ic-check", size: 14)
-                            Text(Copy.markRenewed)
+                            Text("已续费")
                         }
                     }
                     .buttonStyle(SoftButtonStyle())
-                    .frame(minHeight: 44)
+                    .frame(minHeight: Ds.isDesktop ? 28 : 44)
+                    .accessibilityLabel(Copy.markRenewed)
                     .accessibilityIdentifier("renew-" + record.id)
                 }
             }
-            if Ds.isDesktop && !pending {
-                desktopActions(record, active: active)
-            }
+            if Ds.isDesktop && !pending { desktopActions(record, active: active) }
         }
         .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .frame(minHeight: Ds.doubleRowHeight)
-        .contentShape(Rectangle())
-        .disabled(store.isWorking)
-
-        let main = Group {
-            if Ds.isDesktop {
-                row
-                    .onTapGesture { router.modal = .editSubscription(record) }
-                    .contextMenu {
-                        Button { router.modal = .editSubscription(record) } label: { Label(Copy.editAction, image: "ic-info") }
-                        Button {
-                            Task { await store.setSubscriptionPaused(id: record.id, paused: active) }
-                        } label: { Label(active ? Copy.pause : Copy.resume, image: active ? "ic-pause" : "ic-play") }
-                        Button(role: .destructive) {
-                            Task { await store.deleteSubscription(id: record.id) }
-                        } label: { Label(Copy.delete, image: "ic-trash") }
-                    }
-            } else {
-                Button { router.modal = .editSubscription(record) } label: { row }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("subscription-editor-" + record.name)
-            }
+        .background(Color.cardBg)
+        .contextMenu {
+            Button { router.modal = .editSubscription(record) } label: { Label(Copy.editAction, image: "ic-info") }
+            Button {
+                Task { await store.setSubscriptionPaused(id: record.id, paused: active) }
+            } label: { Label(active ? Copy.pause : Copy.resume, image: active ? "ic-pause" : "ic-play") }
+            Button(role: .destructive) {
+                Task { await store.deleteSubscription(id: record.id) }
+            } label: { Label(Copy.delete, image: "ic-trash") }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Copy.a11ySubscription(
-            record.name, amount: Fmt.money(record.amountCents, record.currency),
-            cycle: Copy.cycleLabel(record.cycle), date: Fmt.day(record.nextChargeOn),
-            status: active ? "在订" : "已暂停"
-        ))
-
+        .disabled(store.isWorking)
         return Group {
-            if Ds.isDesktop {
-                main
-            } else {
-                #if os(iOS)
-                SwipeableRow(specs: mobileSwipeSpecs(record, pending: pending, active: active)) {
-                    main
-                }
-                #else
-                main
-                #endif
+            if Ds.isDesktop { main }
+            else {
+                SwipeableRow(specs: mobileSwipeSpecs(record, pending: pending, active: active)) { main }
             }
         }
     }

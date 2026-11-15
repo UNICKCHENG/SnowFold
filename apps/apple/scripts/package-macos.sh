@@ -17,7 +17,7 @@ SNOWFOLD_MACOS_UNIVERSAL=1 bash "$APPLE_ROOT/scripts/build-core.sh"
 # 仅启用截图钩子（AcceptanceCapture 与启动参数钩子）；默认打包不带任何钩子。
 CAPTURE_FLAGS=()
 if [ "${SNOWFOLD_ACCEPTANCE_CAPTURE:-0}" = "1" ]; then
-    CAPTURE_FLAGS=("OTHER_SWIFT_FLAGS=$(inherited) -DACCEPTANCE")
+    CAPTURE_FLAGS=('OTHER_SWIFT_FLAGS=$(inherited) -DACCEPTANCE')
 fi
 xcodebuild build \
     -project "$APPLE_ROOT/SnowFold.xcodeproj" \

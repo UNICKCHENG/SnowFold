@@ -18,6 +18,7 @@ struct SyncSection: View {
     @State private var error: String?
     @State private var saving = false
     @State private var editingStorage = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -117,7 +118,7 @@ struct SyncSection: View {
         Text(text)
             .font(Ds.body())
             .foregroundStyle(Color.ink)
-            .frame(width: labelWidth, alignment: Ds.isDesktop ? .trailing : .leading)
+            .frame(width: typeSize.isAccessibilitySize ? nil : labelWidth, alignment: Ds.isDesktop ? .trailing : .leading)
     }
 
     private func fieldRow(_ label: String, text: Binding<String>, id: String) -> some View {

@@ -1,76 +1,68 @@
 #if os(macOS)
 import AppKit
-import CoreGraphics
+import ScreenCaptureKit
 
-/// 验收截图钩子（与桌面端 SNOWFOLD_ACCEPTANCE_EVIDENCE_DIR 同一性质）：
-/// 以 `SnowFold -SNOWFOLD_SHOT_WIDTH <w> -SNOWFOLD_SHOT_HEIGHT <h> -SNOWFOLD_SHOT_PATH <file>` 启动时，
-/// 加载完成后把窗口调整为指定尺寸、截取自身窗口内容并写入 PNG，然后退出。
-/// 截取自身窗口不需要「屏幕录制」权限；不带参数启动时完全不生效。
+/// 验收截图钩子：指定尺寸、主题与输出路径时截取自身窗口；普通启动不生效。
+/// 使用系统 ScreenCaptureKit，避免 macOS 26 已不可用的 CGWindowListCreateImage。
+@MainActor
 enum AcceptanceCapture {
     static func runIfRequested() {
         let arguments = CommandLine.arguments
-        guard let widthIndex = arguments.firstIndex(of: "-SNOWFOLD_SHOT_WIDTH"),
-              let heightIndex = arguments.firstIndex(of: "-SNOWFOLD_SHOT_HEIGHT"),
-              let pathIndex = arguments.firstIndex(of: "-SNOWFOLD_SHOT_PATH"),
-              widthIndex + 1 < arguments.count,
-              heightIndex + 1 < arguments.count,
-              pathIndex + 1 < arguments.count,
-              let width = Double(arguments[widthIndex + 1]),
-              let height = Double(arguments[heightIndex + 1])
-        else { return }
-        let appearanceName = arguments.firstIndex(of: "-SNOWFOLD_SHOT_APPEARANCE").flatMap {
-            $0 + 1 < arguments.count ? arguments[$0 + 1] : nil
-        }
-        capture(width: width, height: height, output: arguments[pathIndex + 1], appearance: appearanceName)
+        guard let width = value("-SNOWFOLD_SHOT_WIDTH", in: arguments).flatMap(Double.init),
+              let height = value("-SNOWFOLD_SHOT_HEIGHT", in: arguments).flatMap(Double.init),
+              let output = value("-SNOWFOLD_SHOT_PATH", in: arguments) else { return }
+        let appearance = value("-SNOWFOLD_SHOT_APPEARANCE", in: arguments)
+        Task { await capture(width: width, height: height, output: output, appearance: appearance) }
     }
 
-    private static func capture(width: Double, height: Double, output: String, appearance: String?) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            if let appearance {
-                NSApp.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
+    private static func value(_ flag: String, in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }
+
+    private static func capture(width: Double, height: Double, output: String, appearance: String?) async {
+        try? await Task.sleep(for: .seconds(3.5))
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        if let appearance {
+            NSApp.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
+        }
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.canBecomeKey }) else {
+            fail(output, reason: "no application window")
+            return
+        }
+        window.setFrame(NSRect(x: window.frame.minX, y: window.frame.minY, width: width, height: height), display: true)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        try? await Task.sleep(for: .seconds(1.2))
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard let capturedWindow = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) else {
+                fail(output, reason: "own window is missing from ScreenCaptureKit content")
+                return
             }
-            // 设置窗口截图钩子：优先当前键窗（主窗口可能仍是键窗时取能成为键窗的最上层窗口）。
-            let candidate = NSApp.keyWindow.flatMap { $0.windowNumber > 0 && $0.canBecomeKey ? $0 : nil }
-                ?? NSApp.windows.first(where: { $0.windowNumber > 0 && $0.canBecomeKey })
-            guard let window = candidate else {
-                writeFailureMarker(output, reason: "no application window: \(NSApp.windows.map { "\($0.title) visible=\($0.isVisible)" }.joined(separator: "; "))")
-                exit(3)
+            let filter = SCContentFilter(desktopIndependentWindow: capturedWindow)
+            let config = SCStreamConfiguration()
+            let scale = window.backingScaleFactor
+            config.width = Int(width * scale)
+            config.height = Int(height * scale)
+            config.showsCursor = false
+            let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+            let rep = NSBitmapImageRep(cgImage: image)
+            guard let png = rep.representation(using: .png, properties: [:]) else {
+                fail(output, reason: "png encode failed")
+                return
             }
-            window.makeKeyAndOrderFront(nil)
-            window.setContentSize(NSSize(width: width, height: height))
-            window.center()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                let windowID = CGWindowID(window.windowNumber)
-                let image = CGWindowListCreateImage(
-                    .null,
-                    .optionIncludingWindow,
-                    windowID,
-                    [.bestResolution, .boundsIgnoreFraming]
-                )
-                guard let image else {
-                    writeFailureMarker(output, reason: "CGWindowListCreateImage failed")
-                    exit(4)
-                }
-                let rep = NSBitmapImageRep(cgImage: image)
-                guard let data = rep.representation(using: .png, properties: [:]) else {
-                    writeFailureMarker(output, reason: "png encode failed")
-                    exit(5)
-                }
-                do {
-                    try data.write(to: URL(fileURLWithPath: output))
-                } catch {
-                    fputs("SNOWFOLD_SHOT write failed: \(error)\n", stderr)
-                    exit(6)
-                }
-                NSApp.terminate(nil)
-            }
+            try png.write(to: URL(fileURLWithPath: output))
+            NSApp.terminate(nil)
+        } catch {
+            fail(output, reason: "ScreenCaptureKit: \(error)")
         }
     }
 
-    private static func writeFailureMarker(_ path: String, reason: String) {
-        try? reason.data(using: .utf8)?.write(to: URL(fileURLWithPath: path + ".failure"))
+    private static func fail(_ output: String, reason: String) {
+        try? Data(reason.utf8).write(to: URL(fileURLWithPath: output + ".failure"))
+        exit(3)
     }
 }
 #endif

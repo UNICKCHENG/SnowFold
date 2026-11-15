@@ -57,7 +57,7 @@ struct SettingsView: View {
 struct MobileSettingsView: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var actions = SettingsActions()
+    @StateObject private var actions = SettingsActions()
 
     var body: some View {
         ScrollView {
@@ -90,7 +90,7 @@ struct MobileSettingsView: View {
 struct MacSettingsWindowView: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
-    @State private var actions = SettingsActions()
+    @StateObject private var actions = SettingsActions()
 
     var body: some View {
         @Bindable var router = router
@@ -252,6 +252,7 @@ struct SettingsGroups: View {
 
     @Environment(SnowFoldStore.self) private var store
     let mode: Mode
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ObservedObject var actions: SettingsActions
 
     var body: some View {
@@ -405,7 +406,10 @@ struct SettingsGroups: View {
         title: String, help: String?, titleColor: Color = .ink,
         @ViewBuilder control: () -> Control
     ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        return layout {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(Ds.body())
@@ -610,7 +614,7 @@ final class SettingsActions: ObservableObject {
     // MARK: 导入读取
 
     func handleJSONImport(_ result: Result<URL, Error>, store: SnowFoldStore) {
-        handle(result, store: store) { url in
+        handle(result, store: store) { [self] url in
             let text = try readText(url)
             let info = try await store.inspectJSON(text)
             pendingJSONImport = JSONImport(text: text, info: info)
@@ -618,7 +622,7 @@ final class SettingsActions: ObservableObject {
     }
 
     func handleSealedImport(_ result: Result<URL, Error>, store: SnowFoldStore) {
-        handle(result, store: store) { url in
+        handle(result, store: store) { [self] url in
             let data = try readData(url)
             let info = try await store.inspectSealed(data)
             pendingSealedImport = SealedImport(data: data, info: info)
@@ -626,7 +630,7 @@ final class SettingsActions: ObservableObject {
     }
 
     func handleKeyImport(_ result: Result<URL, Error>, store: SnowFoldStore) {
-        handle(result, store: store) { url in
+        handle(result, store: store) { [self] url in
             let contents = try readText(url)
             let info = try await store.inspectRecoveryCode(contents)
             pendingKeyImport = KeyImport(contents: contents, info: info)
