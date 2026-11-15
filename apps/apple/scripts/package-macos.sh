@@ -19,7 +19,7 @@ CAPTURE_FLAGS=()
 if [ "${SNOWFOLD_ACCEPTANCE_CAPTURE:-0}" = "1" ]; then
     CAPTURE_FLAGS=('OTHER_SWIFT_FLAGS=$(inherited) -DACCEPTANCE')
 fi
-xcodebuild build \
+bash "$APPLE_ROOT/scripts/with-xcode-lock.sh" xcodebuild build \
     -project "$APPLE_ROOT/SnowFold.xcodeproj" \
     -scheme SnowFold-macOS -configuration Release \
     -destination 'generic/platform=macOS' \

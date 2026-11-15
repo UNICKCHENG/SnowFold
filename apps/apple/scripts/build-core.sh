@@ -64,7 +64,7 @@ CARGO_TARGET_DIR="$TARGET_DIR" cargo run --locked --manifest-path "$BINDGEN_MANI
 cp "$STAGING/Generated/Swift/SnowFoldCoreFFI.h" "$STAGING/Headers/"
 cp "$STAGING/Generated/Swift/SnowFoldCoreFFI.modulemap" "$STAGING/Headers/module.modulemap"
 
-xcodebuild -create-xcframework \
+bash "$APPLE_ROOT/scripts/with-xcode-lock.sh" xcodebuild -create-xcframework \
     -library "$STAGING/aarch64-apple-ios/libsnowfold_core.a" -headers "$STAGING/Headers" \
     -library "$STAGING/aarch64-apple-ios-sim/libsnowfold_core.a" -headers "$STAGING/Headers" \
     -library "$STAGING/macos/libsnowfold_core.a" -headers "$STAGING/Headers" \

@@ -11,7 +11,9 @@ final class SnapshotTours: XCTestCase {
     private var isTablet: Bool { UIDevice.current.userInterfaceIdiom == .pad }
     private let longestName = "招商银行朝朝宝（活期理财）家庭备用金账户"
     private var outputDirectory: URL {
-        URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("snowfold-shots", isDirectory: true)
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("snowfold-shots", isDirectory: true)
+            .appendingPathComponent(ProcessInfo.processInfo.environment["SHOT_RUN_ID"] ?? "manual", isDirectory: true)
     }
 
     override func setUpWithError() throws {
@@ -108,7 +110,8 @@ final class SnapshotTours: XCTestCase {
     }
 
     /// 截图矩阵与行为巡游分开：每屏重新启动真实应用，避免一条导航失败丢失后续屏。
-    func testScreenMatrix() {
+    // 静态截图先执行，后面的真实续费不会改写矩阵夹具。
+    func test00ScreenMatrix() {
         continueAfterFailure = true
         let kind = ProcessInfo.processInfo.environment["SHOT_KIND"] ?? "long"
         let app = XCUIApplication()
@@ -155,6 +158,83 @@ final class SnapshotTours: XCTestCase {
         }
     }
 
+    /// 只通过现有入口与启动钩子补拍真实状态，不注入界面模型。
+    func testSupplementalStates() {
+        continueAfterFailure = true
+        if isTablet { XCUIDevice.shared.orientation = .landscapeLeft }
+        let kind = ProcessInfo.processInfo.environment["SHOT_KIND"] ?? "long"
+        let app = XCUIApplication()
+        if kind == "bad" {
+            app.launch()
+            _ = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "无法")).firstMatch.waitForExistence(timeout: 10)
+            snap("09-error-startup")
+            app.terminate()
+            return
+        }
+        if kind == "key" || kind == "sync" {
+            let account = "snowfold-apple-shots-\(UUID().uuidString)"
+            app.launchArguments = ["-SNOWFOLD_KEYCHAIN_ACCOUNT", account]
+            if kind == "key" { app.launchArguments.append("-SNOWFOLD_KEYCHAIN_FAILURE") }
+            else {
+                app.launchArguments += ["-SNOWFOLD_SYNC_ACCEPTANCE", "s3"]
+                if mode.contains("dark") { app.launchArguments.append("-SNOWFOLD_SYNC_DARK") }
+            }
+            app.launch()
+            let sync = app.buttons["sync-toolbar"].firstMatch
+            _ = app.descendants(matching: .any).matching(identifier: "nav-overview").firstMatch.waitForExistence(timeout: 10)
+            if kind == "key" { snap("09-error-key") }
+            else if sync.waitForExistence(timeout: 10) {
+                snap("sync-idle")
+                navigate("settings", app: app)
+                snap("settings-sync-on")
+                for page in 1...4 { app.swipeUp(); snap("settings-sync-on-page-\(page)") }
+                navigate("overview", app: app)
+                sync.tap()
+                let failed = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "上次同步失败")).firstMatch
+                XCTAssertTrue(failed.waitForExistence(timeout: 8))
+                snap("08-sync-failed")
+            }
+            app.terminate()
+            return
+        }
+        if kind == "neg" {
+            for tab in ["overview", "assets"] {
+                app.launchArguments = ["-SNOWFOLD_SHOT_TAB", tab]
+                app.launch()
+                _ = app.descendants(matching: .any).matching(identifier: "nav-" + tab).firstMatch.waitForExistence(timeout: 10)
+                snap("negative-" + tab)
+                app.terminate()
+            }
+            return
+        }
+        if kind != "empty" {
+            for (name, tab, flag) in [("08-toast-undo", "assets", "-SNOWFOLD_SHOT_UNDO"),
+                                      ("08-toast-notice", "subscriptions", "-SNOWFOLD_SHOT_NOTICE")] {
+                app.launchArguments = ["-SNOWFOLD_SHOT_TAB", tab, flag]
+                app.launch()
+                let text = flag.hasSuffix("UNDO") ? "撤销" : "已导出"
+                _ = element(containing: text, app: app).waitForExistence(timeout: 8)
+                snap(name)
+                app.terminate()
+            }
+            app.launchArguments = ["-SNOWFOLD_SHOT_TAB", "subscriptions"]
+            app.launch()
+            let row = app.descendants(matching: .any).matching(identifier: "subscription-editor-Apple Music 家庭版").firstMatch
+            reveal(row, app: app, scrollID: "subscription-swipe")
+            row.swipeLeft()
+            snap("04-subscriptions-swipe")
+            app.terminate()
+        }
+        app.launchArguments = ["-SNOWFOLD_SHOT_TAB", "settings"]
+        app.launch()
+        let clear = app.buttons["clear-all"].firstMatch
+        reveal(clear, app: app, scrollID: "clear-all")
+        clear.tap()
+        XCTAssertTrue(app.staticTexts["清空全部数据？"].firstMatch.waitForExistence(timeout: 5))
+        snap("07-confirm-clear")
+        app.terminate()
+    }
+
     // MARK: 长数据巡游
 
     func testLongTour() {
@@ -176,14 +256,14 @@ final class SnapshotTours: XCTestCase {
         navigate("subscriptions", app: app)
         XCTAssertTrue(element(containing: "月均支出", app: app).waitForExistence(timeout: 8))
         snap("statistics")
-        let renew = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "已续费")).firstMatch
+        let renew = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "renew-")).firstMatch
         reveal(renew, app: app, scrollID: "subscriptions-list")
         snap("subscriptions")
         renew.tap()
-        let renewed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "已顺延")).firstMatch
+        let renewed = element(containing: "已顺延", app: app)
         XCTAssertTrue(renewed.waitForExistence(timeout: 8))
         snap("renew-notice")
-        app.buttons["关闭"].firstMatch.tap()
+        if app.buttons["关闭"].firstMatch.exists { app.buttons["关闭"].firstMatch.tap() }
 
         let music = app.descendants(matching: .any)
             .matching(identifier: "subscription-editor-Apple Music 家庭版").firstMatch

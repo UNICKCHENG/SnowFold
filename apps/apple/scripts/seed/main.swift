@@ -25,7 +25,7 @@ func shift(days: Int = 0, months: Int = 0) -> String {
     return dayString(date)
 }
 
-let core = try SnowFoldCore.open(dataDir: dataDirectory, keyStore: KeychainKeyStore())
+let core = try SnowFoldCore.open(dataDir: dataDirectory, keyStore: KeychainKeyStore(account: "snowfold-apple-seed"))
 
 // 主金额回归用：只有这一项资产，净资产恰为 ¥12,345,678.90。
 if arguments.contains("--hero") {
@@ -72,15 +72,18 @@ for (category, name, cents) in assetSpecs {
     _ = try core.createAsset(categoryCode: category, assetName: name, amountCents: cents)
 }
 
-// 长数据：24 字名称、¥9,999,999,999.99，每个分类补至 12 项。
-_ = try core.createAsset(categoryCode: "cash", assetName: "家庭共同财务长期规划专用储蓄理财备用资金账户记录", amountCents: 999_999_999_999)
-for category in ["cash", "fixed", "investment", "receivable", "debt"] {
-    let existingCount = try core.data().assets.filter { $0.categoryCode == category }.count
-    if existingCount < 12 {
-        for index in (existingCount + 1)...12 {
-            _ = try core.createAsset(categoryCode: category, assetName: "家庭长期规划账户 · 第 \(index) 项", amountCents: 10_000 + Int64(index) * 125)
+if !arguments.contains("--standard") {
+    // 长数据：24 字名称、¥9,999,999,999.99，每个分类补至 12 项。
+    _ = try core.createAsset(categoryCode: "cash", assetName: "家庭共同财务长期规划专用储蓄理财备用资金账户记录", amountCents: 999_999_999_999)
+    for category in ["cash", "fixed", "investment", "receivable", "debt"] {
+        let existingCount = try core.data().assets.filter { $0.categoryCode == category }.count
+        if existingCount < 12 {
+            for index in (existingCount + 1)...12 {
+                _ = try core.createAsset(categoryCode: category, assetName: "家庭长期规划账户 · 第 \(index) 项", amountCents: 10_000 + Int64(index) * 125)
+            }
         }
     }
+
 }
 
 // 余额变动：追加历史快照。
@@ -134,19 +137,19 @@ for (name, cents, currency, cycle, next) in subscriptionSpecs {
 }
 
 // 补至 30 个订阅（人民币与美元混合，含暂停与待确认）。
-for index in 14...30 {
-    _ = try core.createSubscription(subscription: SubscriptionInput(
-        name: "家庭订阅服务长期规划项目第 \(index) 项", amountCents: index == 14 ? 99_999_999 : Int64(index) * 199,
-        currency: index.isMultiple(of: 3) ? "USD" : "CNY", cycle: "monthly",
-        nextChargeOn: shift(days: index - 16), status: index.isMultiple(of: 7) ? "paused" : "active"))
+if !arguments.contains("--standard") {
+    for index in 14...30 {
+        _ = try core.createSubscription(subscription: SubscriptionInput(
+            name: "家庭订阅服务长期规划项目第 \(index) 项", amountCents: index == 14 ? 99_999_999 : Int64(index) * 199,
+            currency: index.isMultiple(of: 3) ? "USD" : "CNY", cycle: "monthly",
+            nextChargeOn: shift(days: index - 16), status: index.isMultiple(of: 7) ? "paused" : "active"))
+    }
+    let finalData = try core.data()
+    precondition(finalData.assets.count == 60)
+    precondition(finalData.subscriptions.count == 30)
 }
-let finalData = try core.data()
-precondition(finalData.assets.count == 60)
-precondition(finalData.subscriptions.count == 30)
 
-// 本机主题与密钥：让截图与真实使用一致。
+// 夹具只保存业务数据与主题；同步密钥由实际运行的应用惰性创建。
 try core.saveTheme(theme: .system)
-// CI 临时签名可能没有钥匙串写权限；造数不依赖同步密钥，导出失败不阻断。
-_ = try? core.exportSealed()
 let overview = try core.overview(on: dayString(Date()))
 print("seeded: \(overview.totalAssetsCents) cents assets, \(overview.activeSubscriptions) active subs, \(overview.pausedSubscriptions) paused")

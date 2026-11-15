@@ -83,25 +83,7 @@ jobs:
 
       - name: Seed fixtures (long / negative / broken)
         if: ${{ inputs.mode != 'compile' }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$APPLE_ROOT/.build/seed-link"
-          cp "$CARGO_TARGET_DIR/aarch64-apple-darwin/release/libsnowfold_core.a" "$APPLE_ROOT/.build/seed-link/"
-          # build-core.sh 只把头文件与 module.modulemap 打进 xcframework，取 macOS 切片的 Headers
-          FFI_HEADERS="$(dirname "$(find "$APPLE_ROOT/Generated/SnowFoldCore.xcframework" -path '*macos*' -name module.modulemap | head -1)")"
-          test -f "$FFI_HEADERS/module.modulemap"
-          swiftc -O -I "$FFI_HEADERS" -L "$APPLE_ROOT/.build/seed-link" \
-            -lsnowfold_core -lc++ -liconv \
-            -o "$APPLE_ROOT/.build/sample-seed" \
-            "$APPLE_ROOT/scripts/seed/main.swift" \
-            "$APPLE_ROOT/Generated/Swift/SnowFoldCore.swift" \
-            "$APPLE_ROOT/Sources/Core/KeychainKeyStore.swift"
-          # 数据目录必须是第一个参数（核心要求绝对路径）。
-          "$APPLE_ROOT/.build/sample-seed" "$APPLE_ROOT/.build/long-data-v2"
-          "$APPLE_ROOT/.build/sample-seed" "$APPLE_ROOT/.build/neg-data-v1" --neg
-          # 坏库：非 SQLite 文件触发启动失败页
-          mkdir -p "$APPLE_ROOT/.build/bad-data"
-          echo "not a database" > "$APPLE_ROOT/.build/bad-data/snowfold.sqlite3"
+        run: bash apps/apple/scripts/seed-fixtures.sh
 
       - name: Create snowfold-apple simulators (393x852, 375x667, iPad 1180x820)
         if: ${{ inputs.mode != 'compile' }}
@@ -130,13 +112,13 @@ jobs:
                   print(device["udid"])
                   break
           PY
-          runtime=$(xcrun simctl list runtimes -j | python3 /tmp/pick_runtime.py)
-          iphone_type=$(xcrun simctl list devicetypes -j | python3 /tmp/pick_devicetype.py \
-            "iPhone 16" "iPhone 17" "iPhone 16 Pro" "iPhone 17 Pro" "iPhone 15")
-          se_type=$(xcrun simctl list devicetypes -j | python3 /tmp/pick_devicetype.py \
-            "iPhone SE (3rd generation)" "iPhone SE (2nd generation)")
-          ipad_type=$(xcrun simctl list devicetypes -j | python3 /tmp/pick_devicetype.py \
-            "iPad Air 11-inch (M3)" "iPad Air 11-inch (M2)" "iPad Air (5th generation)" "iPad Air" "iPad")
+          runtime=$(xcrun simctl list runtimes -j | python3 -I /tmp/pick_runtime.py)
+          iphone_type=$(xcrun simctl list devicetypes -j | python3 -I /tmp/pick_devicetype.py \
+            "iPhone 16" "iPhone 15" "iPhone 16 Pro" "iPhone 17" "iPhone 17 Pro")
+          se_type=$(xcrun simctl list devicetypes -j | python3 -I /tmp/pick_devicetype.py \
+            "iPhone SE (3rd generation)" "iPhone SE (2nd generation)" "iPhone 17e" "iPhone 16e")
+          ipad_type=$(xcrun simctl list devicetypes -j | python3 -I /tmp/pick_devicetype.py \
+            "iPad Air 11-inch (M3)" "iPad Air 11-inch (M4)" "iPad Air 11-inch (M2)" "iPad Air (5th generation)" "iPad Air" "iPad")
           echo "devices: ${iphone_type} / ${se_type} / ${ipad_type} (runtime ${runtime})"
           for sim in snowfold-apple-iphone snowfold-apple-iphone-se snowfold-apple-ipad; do
               xcrun simctl delete "$sim" 2>/dev/null || true
@@ -144,9 +126,9 @@ jobs:
           xcrun simctl create snowfold-apple-iphone "$iphone_type" "$runtime"
           xcrun simctl create snowfold-apple-iphone-se "$se_type" "$runtime"
           xcrun simctl create snowfold-apple-ipad "$ipad_type" "$runtime"
-          iphone_udid=$(xcrun simctl list devices -j | python3 /tmp/pick_udid.py snowfold-apple-iphone)
-          se_udid=$(xcrun simctl list devices -j | python3 /tmp/pick_udid.py snowfold-apple-iphone-se)
-          ipad_udid=$(xcrun simctl list devices -j | python3 /tmp/pick_udid.py snowfold-apple-ipad)
+          iphone_udid=$(xcrun simctl list devices -j | python3 -I /tmp/pick_udid.py snowfold-apple-iphone)
+          se_udid=$(xcrun simctl list devices -j | python3 -I /tmp/pick_udid.py snowfold-apple-iphone-se)
+          ipad_udid=$(xcrun simctl list devices -j | python3 -I /tmp/pick_udid.py snowfold-apple-ipad)
           for udid in "$iphone_udid" "$se_udid" "$ipad_udid"; do
               xcrun simctl bootstatus "$udid" -b
               xcrun simctl status_bar "$udid" override --time "9:41" --batteryLevel 100 --batteryState charged --wifiBars 3
@@ -175,85 +157,28 @@ jobs:
             -derivedDataPath "$APPLE_ROOT/.build/shots-mac" CODE_SIGNING_ALLOWED=YES test \
             2>&1 | tee "$APPLE_ROOT/.build/tests-mac.log" | tail -40
 
-      - name: iPhone tour - empty light
+      - name: iPhone, small iPhone and iPad full light/dark matrix (including AX5 and interactions)
         if: ${{ inputs.mode != 'compile' }}
         continue-on-error: true
         env:
           DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/shots-ios
           SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
-        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 empty light
-
-      - name: iPhone tour - long light
-        if: ${{ inputs.mode != 'compile' }}
-        continue-on-error: true
-        env:
-          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/shots-ios
-          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
-        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 long light
-
-      - name: iPhone tour - long dark
-        if: ${{ inputs.mode != 'compile' }}
-        continue-on-error: true
-        env:
-          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/shots-ios
-          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
-        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 long dark
-
-      - name: iPhone tour - empty light (AX5 largest type)
-        if: ${{ inputs.mode != 'compile' }}
-        continue-on-error: true
-        env:
-          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/shots-ios
-          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
-        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 empty light ax
-
-      - name: iPhone tour - interaction (create, foreground refresh)
-        if: ${{ inputs.mode != 'compile' }}
-        continue-on-error: true
-        env:
-          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/shots-ios
-          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
-        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPHONE_UDID" ip16 interaction light
-
-      - name: iPhone 375x667 tour - long light
-        if: ${{ inputs.mode != 'compile' }}
-        continue-on-error: true
-        env:
-          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/shots-ios
-          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
-        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_SE_UDID" se long light
-
-      - name: iPad tour - empty light
-        if: ${{ inputs.mode != 'compile' }}
-        continue-on-error: true
-        env:
-          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/shots-ios
-          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
-        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPAD_UDID" ipad empty light
-
-      - name: iPad tour - long light
-        if: ${{ inputs.mode != 'compile' }}
-        continue-on-error: true
-        env:
-          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/shots-ios
-          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
-        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPAD_UDID" ipad long light
-
-      - name: iPad tour - long dark
-        if: ${{ inputs.mode != 'compile' }}
-        continue-on-error: true
-        env:
-          DERIVED_DATA: ${{ github.workspace }}/apps/apple/.build/shots-ios
-          SNOWFOLD_SHOTS_DEST: ${{ env.SHOTS_DIR }}
-        run: bash apps/apple/scripts/run-shots.sh "$SNOWFOLD_IPAD_UDID" ipad long dark
+        run: bash apps/apple/scripts/run-ios-matrix.sh "$SNOWFOLD_IPHONE_UDID" "$SNOWFOLD_SE_UDID" "$SNOWFOLD_IPAD_UDID"
 
       - name: iPhone home screen icon shot
         if: ${{ inputs.mode != 'compile' }}
         continue-on-error: true
         run: |
+          xcrun simctl bootstatus "$SNOWFOLD_IPHONE_UDID" -b
           xcrun simctl terminate "$SNOWFOLD_IPHONE_UDID" app.snowfold 2>/dev/null || true
           sleep 4
           xcrun simctl io "$SNOWFOLD_IPHONE_UDID" screenshot "$SHOTS_DIR/icon-iphone-homescreen.png"
+
+      - name: Expand the capture display and retain its original mode
+        if: ${{ inputs.mode != 'compile' }}
+        run: |
+          original_mode=$(swift apps/apple/scripts/capture-display.swift)
+          echo "SNOWFOLD_ORIGINAL_DISPLAY_MODE=$original_mode" >> "$GITHUB_ENV"
 
       - name: macOS window, dialog, settings and banner shots
         if: ${{ inputs.mode != 'compile' }}
@@ -292,11 +217,9 @@ jobs:
           CAPTURE="$(mktemp -d "$HOME/Library/Containers/app.snowfold/Data/tmp/pkg.XXXXXX")"
           mkdir -p "$CAPTURE/long"
           cp -R "$FIXTURE_ROOT/long/." "$CAPTURE/long/"
-          open -W -n -a "$APP" --env "SNOWFOLD_DATA_DIR=$CAPTURE/long" --args \
-            -SNOWFOLD_SHOT_WIDTH 1080 -SNOWFOLD_SHOT_HEIGHT 720 \
-            -SNOWFOLD_SHOT_PATH "$CAPTURE/package-first-screen.png" \
-            -SNOWFOLD_SHOT_APPEARANCE light -SNOWFOLD_SHOT_TAB overview \
-            > "$APPLE_ROOT/.build/package-first-screen.log" 2>&1 || true
+          bash apps/apple/scripts/capture-mac-window.sh "$APP" "$CAPTURE/package-first-screen.png" \
+            "$CAPTURE/long" 1080 720 light -SNOWFOLD_SHOT_TAB overview \
+            > "$APPLE_ROOT/.build/package-first-screen.log" 2>&1
           if [ -f "$CAPTURE/package-first-screen.png" ]; then
             cp "$CAPTURE/package-first-screen.png" "$PKG_DIR/"
           else
@@ -311,6 +234,9 @@ jobs:
       - name: Shut down owned simulators
         if: ${{ always() && inputs.mode != 'compile' }}
         run: |
+          if [ -n "${SNOWFOLD_ORIGINAL_DISPLAY_MODE:-}" ]; then
+            swift apps/apple/scripts/capture-display.swift "$SNOWFOLD_ORIGINAL_DISPLAY_MODE"
+          fi
           for udid in "${SNOWFOLD_IPHONE_UDID:-}" "${SNOWFOLD_SE_UDID:-}" "${SNOWFOLD_IPAD_UDID:-}"; do
             [ -n "$udid" ] && xcrun simctl shutdown "$udid" || true
           done
