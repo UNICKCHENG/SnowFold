@@ -195,7 +195,7 @@ struct MacSettingsWindowView: View {
         return VStack(spacing: 8) {
             Text(router.settingsTab.title)
                 .font(Ds.sectionTitle())
-                .foregroundStyle(Color.ink)
+                .foregroundStyle(.primary)
             HStack(spacing: 4) {
                 ForEach(MacSettingsTab.allCases) { tab in
                     let selected = router.settingsTab == tab
@@ -204,10 +204,10 @@ struct MacSettingsWindowView: View {
                     } label: {
                         VStack(spacing: 2) {
                             AppIcon(name: tab.icon, size: 24, fill: selected)
-                                .foregroundStyle(selected ? Color.brand : Color.text2)
+                                .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                             Text(tab.title)
                                 .font(Ds.auxMedium())
-                                .foregroundStyle(selected ? Color.brand : Color.text2)
+                                .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }

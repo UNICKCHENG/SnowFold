@@ -55,7 +55,7 @@ struct SubscriptionAvatar: View {
 
 // MARK: - 按钮（§5.1）
 
-/// 主要：brand 底 on-brand 中等。悬停 +8% 亮度，按下 −10%。
+/// 主要：brand 底 on-brand 中等。悬停叠 4% 主文字色，按下叠 8%。
 struct PrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     @State private var hovering = false
@@ -71,8 +71,8 @@ struct PrimaryButtonStyle: ButtonStyle {
                     .fill(enabled ? Color.brand : Color.sep)
                     .overlay {
                         if enabled {
-                            Rectangle().fill(configuration.isPressed ? Color.black.opacity(0.10)
-                                             : (hovering ? Color.white.opacity(0.08) : .clear))
+                            Rectangle().fill(configuration.isPressed ? Color.ink.opacity(0.08)
+                                             : (hovering ? Color.ink.opacity(0.04) : .clear))
                         }
                     }
             )
@@ -106,7 +106,7 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
-/// 危险：neg 底，浅色白字 / 深 #0E0E10。
+/// 危险：neg 底，on-brand 字；叠层同主按钮。
 struct DangerButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     @State private var hovering = false
@@ -122,8 +122,8 @@ struct DangerButtonStyle: ButtonStyle {
                     .fill(Color.neg)
                     .overlay {
                         if enabled {
-                            Rectangle().fill(configuration.isPressed ? Color.black.opacity(0.10)
-                                             : (hovering ? Color.white.opacity(0.08) : .clear))
+                            Rectangle().fill(configuration.isPressed ? Color.ink.opacity(0.08)
+                                             : (hovering ? Color.ink.opacity(0.04) : .clear))
                         }
                     }
             }
@@ -633,7 +633,7 @@ struct UndoBanner: View {
     var body: some View {
         HStack(spacing: 12) {
             AppIcon(name: "ic-trash", size: 16)
-                .foregroundStyle(Color.text2)
+                .foregroundStyle(.secondary)
             Text(state.message)
                 .font(Ds.bodyMedium())
                 .lineLimit(2)
@@ -688,7 +688,7 @@ struct NoticeToast: View {
                 store.dismissNotice()
             } label: {
                 AppIcon(name: "ic-close", size: 16)
-                    .foregroundStyle(Color.text2)
+                    .foregroundStyle(.secondary)
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }

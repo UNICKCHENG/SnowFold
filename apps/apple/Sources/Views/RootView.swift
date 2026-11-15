@@ -279,7 +279,7 @@ struct ModalSheet: View {
         sheetContent
             .frame(maxWidth: sizeClass == .regular ? 540 : nil)
             .frame(maxWidth: .infinity)
-            .presentationBackground(Color.bg)
+        // 弹层背景与背后的系统遮罩交给系统：Liquid Glass 材质 + 自动层级抬升。
     }
 
     @ViewBuilder
@@ -405,7 +405,7 @@ struct SplitRootView: View {
             #if os(iOS)
             Text("SnowFold")
                 .font(Ds.sectionTitle())
-                .foregroundStyle(Color.ink)
+                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
@@ -432,8 +432,9 @@ struct SplitRootView: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// 侧边栏行：行高 32（桌面）/44（iPad），图标 20/24 与文字间距 10/12；
-    /// 选中 brand-soft 底、实心图标与文字 brand（中等）。
+    /// 侧边栏行：行高 32（桌面）/44（移动），图标 20/24 与文字间距 10/12；
+    /// 玻璃侧边栏上文字与图标用层级样式（选中 primary、未选中 secondary），
+    /// 选中底为 brandSoft（强调色 14% 浅底，同系统侧边栏选中观感）。
     private func sidebarRow(_ tab: Router.Tab, icon: String, title: String) -> some View {
         let selected = router.tab == tab
         return Button {
@@ -447,10 +448,10 @@ struct SplitRootView: View {
         } label: {
             HStack(spacing: Ds.isDesktop ? 10 : 12) {
                 AppIcon(name: icon, size: Ds.isDesktop ? 20 : 24, fill: selected)
-                    .foregroundStyle(selected ? Color.brand : Color.text2)
+                    .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                 Text(title)
                     .font(selected ? Ds.bodyMedium() : Ds.body())
-                    .foregroundStyle(selected ? Color.brand : Color.ink)
+                    .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
@@ -562,6 +563,8 @@ struct ToolbarPlusButton: View {
     var body: some View {
         Button(action: action) {
             AppIcon(name: icon, size: 18)
+                // 玻璃工具栏按钮用层级样式，不吃全局 tint。
+                .foregroundStyle(.primary)
         }
         .accessibilityLabel(label)
         .accessibilityIdentifier(identifier)

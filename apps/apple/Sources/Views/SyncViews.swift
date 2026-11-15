@@ -399,8 +399,9 @@ struct SyncToolbarButton: View {
         }
     }
 
-    private var foreground: Color {
-        store.isSyncing ? Color.brand : Color.ink
+    /// 玻璃工具栏上用层级样式；同步中保持品牌强调色。
+    private var foreground: AnyShapeStyle {
+        store.isSyncing ? AnyShapeStyle(Color.brand) : AnyShapeStyle(.primary)
     }
 
     /// 匀速 1 秒/圈；减少动态效果时不转（只换 brand 色）。
