@@ -18,4 +18,9 @@
 
 ## 界面图标
 
-`shared/icons/ui/` 是界面里用到的 SVG 图标（钱包、首页、趋势等）。桌面端在编译时把它们嵌进程序（`apps/desktop/src/assets.rs`）；手机端优先用各平台自带的系统图标，品牌相关的图标从这里取。
+四端界面图标只用一套：IconMCP（MIT，许可见 `shared/icons/LICENSE-IconMCP.txt`），不用 SF Symbols、Material Icons、Lucide 等系统或第三方图标库。
+
+- `shared/icons/line/`：线条版，默认状态用。
+- `shared/icons/fill/`：同名实心版，导航选中态、强调态用（plus、check、refresh、undo、trending-up、chevron 等本身没有实心差异，两版相同）。
+- 尺寸只有 16（行内）、20（工具栏、列表）、24（移动导航）三档，空状态另用 48；描边粗细随尺寸等比，用途与名称对照见 [design.md](design.md) §3。
+- 各端从这两个目录生成自己的资源：苹果进 Asset Catalog（Preserve Vector Data + Template），安卓构建时转 vector drawable，桌面编译时嵌进程序。新增图标先放进这两个目录，再在 design.md §3 登记用途。

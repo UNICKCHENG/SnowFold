@@ -11,7 +11,7 @@
 ## 冻结的规范
 
 - [docs/copy.md](docs/copy.md)（四端中文文案）和 [docs/design.md](docs/design.md)（视觉）是**冻结**的，只有用户能改。实现照抄；文案或数值看起来不对时，向用户提出，由用户改表。
-- 视觉基准是 GPUI 桌面端源码 `apps/desktop/src/app/`，design.md 的数值带 `文件:行号` 出处；手机与平板布局见 [docs/mobile-layout.md](docs/mobile-layout.md)。
+- 视觉基准是 [docs/design.md](docs/design.md)（桌面以 Mac 为准、Windows 照做；移动以 iOS 为准、安卓照做）与它的设计稿源 `shared/design/`（令牌 `tokens.css` / `tokens.json`，设计稿用 `render_all.sh` 生成）；手机与平板布局见 [docs/mobile-layout.md](docs/mobile-layout.md)。界面图标只用 `shared/icons/line/`（线条）与 `shared/icons/fill/`（实心）里的 IconMCP 图标，不用系统图标库。
 - 写给别人照做的规范（布局、对齐清单等），下发前逐条对照桌面端源码与核心接口核实。
 
 ## 构建与检查

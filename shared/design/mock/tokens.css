@@ -1,0 +1,83 @@
+/* SnowFold 设计令牌（四端唯一来源；设计稿与规范均由此生成） */
+:root {
+  /* 品牌 */
+  --brand: #076B75;            /* 冰川青 */
+  --brand-soft: #E1EDEE;       /* 品牌淡色：选中底、空状态圆底 */
+  --on-brand: #FFFFFF;         /* 品牌实底上的文字/图标 */
+  /* 中性 4 级 + 主文字 */
+  --bg: #F4F4F6;               /* 窗口背景 */
+  --card: #FFFFFF;             /* 卡片 */
+  --sep: #E2E2E7;              /* 分隔线、描边 */
+  --text2: #66666D;            /* 次要文字 */
+  --text: #1C1C1E;             /* 主文字 */
+  /* 语义 3 种 */
+  --neg: #BF3228;              /* 负债与逾期、危险、错误 */
+  --neg-soft: #F9EAEA;
+  --warn: #9A5B00;             /* 提醒：7 天内扣费 */
+  --warn-soft: #F3EBE0;
+  --pos: #1F7A3E;              /* 成功 */
+  /* 分类识别色 */
+  --cat-cash: #946100;     --cat-cash-soft: #F2ECE0;
+  --cat-fixed: #3B7D23;    --cat-fixed-soft: #E7EFE5;
+  --cat-investment: #6A4FD0; --cat-investment-soft: #EDEAF9;
+  --cat-receivable: #1F6FB0; --cat-receivable-soft: #E4EEF6;
+  --cat-debt: #BF3228;     --cat-debt-soft: #F9EAEA;
+  /* 浮层 */
+  --glass: rgba(250, 250, 252, 0.84);
+  --glass-edge: rgba(255, 255, 255, 0.9);
+  --scrim: rgba(28, 28, 30, 0.32);
+  --shadow-float: 0 1px 2px rgba(0,0,0,.06), 0 8px 32px rgba(0,0,0,.14);
+  /* 间距（4 的倍数） */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px; --s10: 40px; --s12: 48px;
+  /* 圆角：卡片一个值、控件一个值；胶囊=高度一半 */
+  --r-card: 16px;
+  --r-control: 10px;
+  /* 字体 */
+  --font: "Inter", "Noto Sans SC", "Noto Sans CJK SC", -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
+}
+[data-theme="dark"] {
+  --brand: #3FC1CC;
+  --brand-soft: #223A3E;
+  --on-brand: #0E0E10;
+  --bg: #0E0E10;
+  --card: #1C1C1F;
+  --sep: #2F2F35;
+  --text2: #9C9CA4;
+  --text: #F2F2F5;
+  --neg: #FF6A5E;  --neg-soft: #402829;
+  --warn: #F5B041; --warn-soft: #3F3424;
+  --pos: #4CC77A;
+  --cat-cash: #E0A93F;      --cat-cash-soft: #3F3525;
+  --cat-fixed: #7CC75B;     --cat-fixed-soft: #2D3B2A;
+  --cat-investment: #A796FF; --cat-investment-soft: #353247;
+  --cat-receivable: #5FA8E8; --cat-receivable-soft: #283543;
+  --cat-debt: #FF6A5E;      --cat-debt-soft: #452A2A;
+  --glass: rgba(36, 36, 40, 0.84);
+  --glass-edge: rgba(255, 255, 255, 0.12);
+  --scrim: rgba(0, 0, 0, 0.56);
+  --shadow-float: 0 1px 2px rgba(0,0,0,.3), 0 8px 32px rgba(0,0,0,.5);
+}
+/* 字号层级：桌面形态 */
+[data-form="desktop"] {
+  --t-display: 600 40px/48px var(--font);
+  --t-title: 600 28px/34px var(--font);
+  --t-headline: 600 15px/20px var(--font);
+  --t-body: 400 13px/18px var(--font);
+  --t-body-m: 500 13px/18px var(--font);
+  --t-caption: 400 11px/14px var(--font);
+  --t-caption-m: 500 11px/14px var(--font);
+  --row: 44px; --row2: 56px; --control-h: 28px; --button-h: 32px; --input-h: 32px;
+  --icon-inline: 16px; --icon-list: 20px; --icon-nav: 20px;
+}
+/* 字号层级：移动形态 */
+[data-form="mobile"] {
+  --t-display: 600 40px/48px var(--font);
+  --t-title: 600 28px/34px var(--font);
+  --t-headline: 600 17px/22px var(--font);
+  --t-body: 400 17px/22px var(--font);
+  --t-body-m: 500 17px/22px var(--font);
+  --t-caption: 400 13px/18px var(--font);
+  --t-caption-m: 500 13px/18px var(--font);
+  --row: 52px; --row2: 64px; --control-h: 32px; --button-h: 50px; --input-h: 44px;
+  --icon-inline: 16px; --icon-list: 20px; --icon-nav: 24px;
+}
