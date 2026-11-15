@@ -55,7 +55,7 @@ struct SubscriptionAvatar: View {
 
 // MARK: - 按钮（§5.1）
 
-/// 主要：brand 底 on-brand 中等。悬停 +8% 亮度，按下 −10%。
+/// 主要：brand 底 on-brand 中等。悬停叠 4% 主文字色，按下叠 8%。
 struct PrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     @State private var hovering = false
@@ -71,8 +71,8 @@ struct PrimaryButtonStyle: ButtonStyle {
                     .fill(enabled ? Color.brand : Color.sep)
                     .overlay {
                         if enabled {
-                            Rectangle().fill(configuration.isPressed ? Color.black.opacity(0.10)
-                                             : (hovering ? Color.white.opacity(0.08) : .clear))
+                            Rectangle().fill(configuration.isPressed ? Color.ink.opacity(0.08)
+                                             : (hovering ? Color.ink.opacity(0.04) : .clear))
                         }
                     }
             )
@@ -106,7 +106,7 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
-/// 危险：neg 底，浅色白字 / 深 #0E0E10。
+/// 危险：neg 底，on-brand 字；叠层同主按钮。
 struct DangerButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     @State private var hovering = false
@@ -122,8 +122,8 @@ struct DangerButtonStyle: ButtonStyle {
                     .fill(Color.neg)
                     .overlay {
                         if enabled {
-                            Rectangle().fill(configuration.isPressed ? Color.black.opacity(0.10)
-                                             : (hovering ? Color.white.opacity(0.08) : .clear))
+                            Rectangle().fill(configuration.isPressed ? Color.ink.opacity(0.08)
+                                             : (hovering ? Color.ink.opacity(0.04) : .clear))
                         }
                     }
             }
@@ -330,11 +330,12 @@ struct SectionHeader<Trailing: View>: View {
     var titleColor: Color = .ink
     var count: Int? = nil
     var countColor: Color = .text2
+    var titleFont: Font? = nil
     @ViewBuilder var trailing: () -> Trailing
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title).font(Ds.sectionTitle()).foregroundStyle(titleColor)
+            Text(title).font(titleFont ?? Ds.sectionTitle()).foregroundStyle(titleColor)
             if let count {
                 Text("\(count)").font(Ds.auxMedium()).monospacedDigit().foregroundStyle(countColor)
             }
@@ -414,6 +415,22 @@ struct EmptyStateView: View {
         .offset(y: -12)
     }
 }
+
+#if os(macOS)
+/// 空页撑满当前滚动视口，窗口变高时仍在内容区居中。
+struct MacEmptyStateContainer<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                content()
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+        }
+    }
+}
+#endif
 
 // MARK: - 分段控件（§5.3）
 
@@ -574,8 +591,9 @@ struct FormRow<Label: View, Field: View>: View {
             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         layout {
             label().font(Ds.body())
-            if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
+            if !Ds.isDesktop && !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
             field()
+                .frame(maxWidth: Ds.isDesktop ? .infinity : nil, alignment: .leading)
         }
     }
 }
@@ -633,12 +651,12 @@ struct UndoBanner: View {
     var body: some View {
         HStack(spacing: 12) {
             AppIcon(name: "ic-trash", size: 16)
-                .foregroundStyle(Color.text2)
+                .foregroundStyle(.secondary)
             Text(state.message)
                 .font(Ds.bodyMedium())
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
+            if !Ds.isDesktop { Spacer(minLength: 8) }
             Button {
                 Task { await store.undoNow() }
             } label: {
@@ -683,12 +701,12 @@ struct NoticeToast: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
-            Spacer(minLength: 8)
+            if !Ds.isDesktop { Spacer(minLength: 8) }
             Button {
                 store.dismissNotice()
             } label: {
                 AppIcon(name: "ic-close", size: 16)
-                    .foregroundStyle(Color.text2)
+                    .foregroundStyle(.secondary)
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }

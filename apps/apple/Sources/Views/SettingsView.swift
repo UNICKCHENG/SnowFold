@@ -195,7 +195,7 @@ struct MacSettingsWindowView: View {
         return VStack(spacing: 8) {
             Text(router.settingsTab.title)
                 .font(Ds.sectionTitle())
-                .foregroundStyle(Color.ink)
+                .foregroundStyle(.primary)
             HStack(spacing: 4) {
                 ForEach(MacSettingsTab.allCases) { tab in
                     let selected = router.settingsTab == tab
@@ -204,10 +204,10 @@ struct MacSettingsWindowView: View {
                     } label: {
                         VStack(spacing: 2) {
                             AppIcon(name: tab.icon, size: 24, fill: selected)
-                                .foregroundStyle(selected ? Color.brand : Color.text2)
+                                .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                             Text(tab.title)
                                 .font(Ds.auxMedium())
-                                .foregroundStyle(selected ? Color.brand : Color.text2)
+                                .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
@@ -286,6 +286,11 @@ struct SettingsGroups: View {
     private var appearanceGroup: some View {
         SettingsGroup(title: Copy.settingsAppearanceHeader) {
             SettingsCard {
+                #if os(macOS)
+                settingsRow(title: Copy.themeFieldLabel, help: Copy.themeHelp) {
+                    ThemeSegmentedPicker().frame(width: 240)
+                }
+                #else
                 VStack(alignment: .leading, spacing: 8) {
                     Text(Copy.themeHelp)
                         .font(Ds.aux())
@@ -299,6 +304,7 @@ struct SettingsGroups: View {
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(minHeight: Ds.doubleRowHeight)
+                #endif
             }
         }
     }
@@ -550,10 +556,10 @@ final class SettingsActions: ObservableObject {
             do {
                 let text = try await store.exportJSON()
                 #if os(macOS)
-                try saveViaPanel(store, name: "snowfold-backup.json") { url in
+                let saved = try saveViaPanel(store, name: "snowfold-backup.json") { url in
                     try Data(text.utf8).write(to: url)
                 }
-                store.showNotice(Copy.backupExported)
+                if saved { store.showNotice(Copy.backupExported) }
                 #else
                 exportJSONText = text
                 #endif
@@ -569,10 +575,10 @@ final class SettingsActions: ObservableObject {
             do {
                 let data = try await store.exportSealed()
                 #if os(macOS)
-                try saveViaPanel(store, name: "snowfold-backup.sfseal") { url in
+                let saved = try saveViaPanel(store, name: "snowfold-backup.sfseal") { url in
                     try data.write(to: url)
                 }
-                store.showNotice(Copy.sealedExported(store.keyFingerprint ?? Copy.keyNotGenerated))
+                if saved { store.showNotice(Copy.sealedExported(store.keyFingerprint ?? Copy.keyNotGenerated)) }
                 #else
                 exportSealedData = data
                 #endif
@@ -588,10 +594,10 @@ final class SettingsActions: ObservableObject {
             do {
                 let text = try await store.exportRecoveryCode()
                 #if os(macOS)
-                try saveViaPanel(store, name: "snowfold-recovery-code.txt") { url in
+                let saved = try saveViaPanel(store, name: "snowfold-recovery-code.txt") { url in
                     try Data(text.utf8).write(to: url)
                 }
-                store.showNotice(Copy.recoveryExported(store.keyFingerprint ?? Copy.keyNotGenerated))
+                if saved { store.showNotice(Copy.recoveryExported(store.keyFingerprint ?? Copy.keyNotGenerated)) }
                 #else
                 exportRecoveryText = text
                 #endif
@@ -674,15 +680,16 @@ final class SettingsActions: ObservableObject {
 
     #if os(macOS)
     /// macOS 导出经 NSSavePanel：可校验目标不覆盖自身数据文件。
-    private func saveViaPanel(_ store: SnowFoldStore, name: String, write: (URL) throws -> Void) throws {
+    private func saveViaPanel(_ store: SnowFoldStore, name: String, write: (URL) throws -> Void) throws -> Bool {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name
         panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return } // 取消静默返回
+        guard panel.runModal() == .OK, let url = panel.url else { return false } // 取消不提示成功
         try validateExportTarget(store, url: url)
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         try write(url)
+        return true
     }
 
     private func validateExportTarget(_ store: SnowFoldStore, url: URL) throws {

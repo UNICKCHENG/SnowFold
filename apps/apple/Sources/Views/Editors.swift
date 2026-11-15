@@ -27,7 +27,8 @@ struct MacDialogScaffold<Content: View, Footer: View>: View {
             if let errorLine {
                 FormErrorLine(message: errorLine)
                     .padding(.top, 12)
-                    .padding(.horizontal, 24)
+                    .padding(.leading, 124)
+                    .padding(.trailing, 24)
                     .accessibilityIdentifier("editor-error")
             }
             HStack(spacing: 8) {
@@ -549,6 +550,7 @@ struct HistoryCorrectionSheet: View {
                 }
                 FormHelpLine(message: Copy.historyNote)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 100)
             }
         } footerLeading: {
             EmptyView()
@@ -742,7 +744,7 @@ struct SubscriptionEditorSheet: View {
                     selection: $currency,
                     label: { Copy.currencyLabel($0) }
                 )
-                .frame(width: 240)
+                .frame(maxWidth: .infinity)
             }
             FormRow(label: { DialogLabel(text: Copy.cycleFieldLabel) }) {
                 BrandSegmentedPicker(
@@ -750,7 +752,7 @@ struct SubscriptionEditorSheet: View {
                     selection: $cycle,
                     label: { Copy.cycleLabel($0) }
                 )
-                .frame(width: 240)
+                .frame(maxWidth: .infinity)
             }
             VStack(alignment: .leading, spacing: 4) {
                 FormRow(label: { DialogLabel(text: Copy.nextChargeDateLabel) }) {
@@ -764,6 +766,7 @@ struct SubscriptionEditorSheet: View {
             }
             FormHelpLine(message: Copy.newSubscriptionHelp)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 100)
         }
     }
     #endif

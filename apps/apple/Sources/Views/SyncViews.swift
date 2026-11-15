@@ -208,6 +208,7 @@ struct SyncSection: View {
                         }
                         Rectangle().fill(Color.sep).frame(height: 1)
                         HStack(alignment: .center, spacing: 12) {
+                            if Ds.isDesktop { Spacer(minLength: 0) }
                             Button {
                                 Task { await store.syncNow() }
                             } label: {
@@ -223,12 +224,13 @@ struct SyncSection: View {
                                 AppIcon(name: "ic-refresh", size: 16)
                                     .foregroundStyle(Color.brand)
                             }
-                            Spacer(minLength: 0)
+                            if !Ds.isDesktop { Spacer(minLength: 0) }
                         }
                         .padding(.horizontal, 16)
                         .frame(minHeight: Ds.rowHeight)
                     }
                 }
+                if Ds.isDesktop { FormHelpLine(message: Copy.syncHelp) }
                 if let message = store.syncError {
                     FormErrorLine(message: message)
                 }
@@ -258,6 +260,9 @@ struct SyncSection: View {
                                 Text(Copy.syncInterval1h).tag(UInt32(60))
                             }
                             .pickerStyle(.menu)
+                            #if os(macOS)
+                            .labelsHidden()
+                            #endif
                             .tint(.brand)
                             .disabled(saving || store.isSyncing)
                         }
@@ -399,8 +404,9 @@ struct SyncToolbarButton: View {
         }
     }
 
-    private var foreground: Color {
-        store.isSyncing ? Color.brand : Color.ink
+    /// 玻璃工具栏上用层级样式；同步中保持品牌强调色。
+    private var foreground: AnyShapeStyle {
+        store.isSyncing ? AnyShapeStyle(Color.brand) : AnyShapeStyle(.primary)
     }
 
     /// 匀速 1 秒/圈；减少动态效果时不转（只换 brand 色）。

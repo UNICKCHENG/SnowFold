@@ -6,77 +6,106 @@ import UIKit
 import AppKit
 #endif
 
-/// 设计令牌（docs/design.md §1，浅/深成对）。
-/// 桌面形态（Mac）与移动形态（iPhone/iPad）只有字号与控件尺寸分档（§4）。
+/// 设计令牌。苹果端配色用系统语义色（2026-11-15 决策）：中性色、语义色、
+/// 品牌色与分类色全部映射到系统色，跟随深浅外观、「增强对比度」与玻璃材质透光；
+/// 映射只写在本文件，各视图继续用令牌名。玻璃表面上的文字与图标用层级样式（.primary/.secondary）。
 extension Color {
-    /// 品牌色「冰川青」：主按钮、选中态、分段控件、开关、链接、焦点环
-    static let brand = Color(light: 0x076B75, dark: 0x3FC1CC)
+    // MARK: 品牌色 —— 系统强调色（iOS/iPadOS = systemBlue，macOS 跟随用户在系统设置选的强调色）
+
+    /// 主按钮、选中态、分段控件、开关、链接、焦点环
+    static let brand = Color.accentColor
     /// 选中行与导航选中项的底、空状态圆底、浅色按钮底
-    static let brandSoft = Color(light: 0xE1EDEE, dark: 0x223A3E)
-    /// 品牌色实底上的文字与图标（深色模式用深字）
-    static let onBrand = Color(light: 0xFFFFFF, dark: 0x0E0E10)
+    static let brandSoft = brand.opacity(0.14)
+    /// 品牌色实底上的文字与图标
+    static let onBrand = Color.white
+
+    // MARK: 中性与语义色
+
+    #if canImport(UIKit)
     /// 窗口背景
-    static let bg = Color(light: 0xF4F4F6, dark: 0x0E0E10)
-    /// 卡片、弹层
-    static let cardBg = Color(light: 0xFFFFFF, dark: 0x1C1C1F)
+    static let bg = Color(uiColor: .systemGroupedBackground)
+    /// 卡片、弹层（sheet 内系统自动抬升）
+    static let cardBg = Color(uiColor: .secondarySystemGroupedBackground)
     /// 分隔线、输入框描边、禁用底
-    static let sep = Color(light: 0xE2E2E7, dark: 0x2F2F35)
-    /// 次要文字、未选中图标
-    static let text2 = Color(light: 0x66666D, dark: 0x9C9CA4)
+    static let sep = Color(uiColor: .separator)
     /// 主文字
-    static let ink = Color(light: 0x1C1C1E, dark: 0xF2F2F5)
+    static let ink = Color(uiColor: .label)
+    /// 次要文字、未选中图标
+    static let text2 = Color(uiColor: .secondaryLabel)
     /// 负债、负值、逾期、错误、危险按钮
-    static let neg = Color(light: 0xBF3228, dark: 0xFF6A5E)
-    static let negSoft = Color(light: 0xF9EAEA, dark: 0x402829)
+    static let neg = Color(uiColor: .systemRed)
     /// 提醒：7 天内扣费、密钥不可用
-    static let warn = Color(light: 0x9A5B00, dark: 0xF5B041)
-    static let warnSoft = Color(light: 0xF3EBE0, dark: 0x3F3424)
+    static let warn = Color(uiColor: .systemOrange)
     /// 成功：续费、同步完成
-    static let pos = Color(light: 0x1F7A3E, dark: 0x4CC77A)
+    static let pos = Color(uiColor: .systemGreen)
+    /// 分类识别色的系统映射
+    private static let catCash = Color(uiColor: .systemOrange)
+    private static let catFixed = Color(uiColor: .systemGreen)
+    private static let catInvestment = Color(uiColor: .systemIndigo)
+    private static let catReceivable = Color(uiColor: .systemTeal)
+    #elseif canImport(AppKit)
+    /// 分组页面底与卡片以系统窗口色为基准，浅色白卡、深色抬升卡片。
+    static let bg = macSurface(isCard: false)
+    static let cardBg = macSurface(isCard: true)
+
+    private static func macSurface(isCard: Bool) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            var surface = NSColor.windowBackgroundColor
+            appearance.performAsCurrentDrawingAppearance {
+                let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                let window = NSColor.windowBackgroundColor.usingColorSpace(.sRGB) ?? .windowBackgroundColor
+                // 系统窗口底在浅色下也是白色，轻叠主文字色建立分组层次。
+                let lifted = window.blended(withFraction: dark ? 0.07 : 0.04, of: .labelColor) ?? window
+                surface = dark ? (isCard ? lifted : window) : (isCard ? window : lifted)
+            }
+            return surface
+        })
+    }
+    /// 分隔线、输入框描边、禁用底
+    static let sep = Color(nsColor: .separatorColor)
+    /// 主文字
+    static let ink = Color(nsColor: .labelColor)
+    /// 次要文字、未选中图标
+    static let text2 = Color(nsColor: .secondaryLabelColor)
+    /// 负债、负值、逾期、错误、危险按钮
+    static let neg = Color(nsColor: .systemRed)
+    /// 提醒：7 天内扣费、密钥不可用
+    static let warn = Color(nsColor: .systemOrange)
+    /// 成功：续费、同步完成
+    static let pos = Color(nsColor: .systemGreen)
+    /// 分类识别色的系统映射
+    private static let catCash = Color(nsColor: .systemOrange)
+    private static let catFixed = Color(nsColor: .systemGreen)
+    private static let catInvestment = Color(nsColor: .systemIndigo)
+    private static let catReceivable = Color(nsColor: .systemTeal)
+    #endif
+
+    /// 软色：对应语义色的 14% 透明度填充，随系统色深浅变化
+    static let negSoft = neg.opacity(0.14)
+    static let warnSoft = warn.opacity(0.14)
 
     /// 分类识别色（图标块与构成条专用，不用于文字）
     static func categoryColor(_ code: String) -> Color {
         switch code {
-        case "fixed": Color(light: 0x3B7D23, dark: 0x7CC75B)
-        case "investment": Color(light: 0x6A4FD0, dark: 0xA796FF)
-        case "receivable": Color(light: 0x1F6FB0, dark: 0x5FA8E8)
-        case "debt": Color(light: 0xBF3228, dark: 0xFF6A5E)
-        default: Color(light: 0x946100, dark: 0xE0A93F) // cash
+        case "fixed": catFixed
+        case "investment": catInvestment
+        case "receivable": catReceivable
+        case "debt": neg
+        default: catCash // cash
         }
     }
 
     /// 分类图标块底色（cat-*-soft）
     static func categorySoft(_ code: String) -> Color {
         switch code {
-        case "fixed": Color(light: 0xE7EFE5, dark: 0x2D3B2A)
-        case "investment": Color(light: 0xEDEAF9, dark: 0x353247)
-        case "receivable": Color(light: 0xE4EEF6, dark: 0x283543)
-        case "debt": Color(light: 0xF9EAEA, dark: 0x452A2A)
-        default: Color(light: 0xF2ECE0, dark: 0x3F3525) // cash
+        case "fixed": catFixed.opacity(0.14)
+        case "investment": catInvestment.opacity(0.14)
+        case "receivable": catReceivable.opacity(0.14)
+        case "debt": negSoft
+        default: catCash.opacity(0.14) // cash
         }
     }
 
-    init(light: UInt32, dark: UInt32) {
-        #if canImport(UIKit)
-        self.init(uiColor: UIColor { traits in
-            let value = traits.userInterfaceStyle == .dark ? dark : light
-            return UIColor(red: CGFloat((value >> 16) & 0xFF) / 255,
-                           green: CGFloat((value >> 8) & 0xFF) / 255,
-                           blue: CGFloat(value & 0xFF) / 255, alpha: 1)
-        })
-        #elseif canImport(AppKit)
-        self.init(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
-            let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark, .aqua, .vibrantLight]) != .aqua
-                && appearance.bestMatch(from: [.darkAqua, .vibrantDark, .aqua, .vibrantLight]) != .vibrantLight
-            let value = isDark ? dark : light
-            return NSColor(srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
-                           green: CGFloat((value >> 8) & 0xFF) / 255,
-                           blue: CGFloat(value & 0xFF) / 255, alpha: 1)
-        }))
-        #else
-        self.init(.white)
-        #endif
-    }
 }
 
 extension ShapeStyle where Self == Color {
