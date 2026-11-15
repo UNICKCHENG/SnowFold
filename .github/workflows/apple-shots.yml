@@ -2,8 +2,12 @@
 # + macOS 窗口/弹层/设置窗口截图 + 正式打包证据（AppIcon.icns、Info.plist 图标键、lipo 架构）。
 name: Apple shots
 
-# 只用手动触发（CI 按分钟计费，跑不跑由实现路显式决定）；攒齐一批改动再跑一次。
+# CI 按分钟计费：跑不跑由实现路控制——改动攒齐一批才推送一次。
+# （workflow_dispatch 需要工作流先落到默认分支才能注册；合并前只能用 push 触发，
+#   合并后可改为 dispatch-only。）
 on:
+  push:
+    branches: [ui/apple]
   workflow_dispatch:
 
 permissions:
