@@ -291,15 +291,12 @@ struct SettingsGroups: View {
                     ThemeSegmentedPicker().frame(width: 240)
                 }
                 #else
+                // 设计稿：「主题」行标题 + 下方满宽分段，无说明行。
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(Copy.themeHelp)
-                        .font(Ds.aux())
-                        .foregroundStyle(Color.text2)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Text(Copy.themeFieldLabel)
+                        .font(Ds.body())
+                        .foregroundStyle(Color.ink)
                     ThemeSegmentedPicker()
-                        #if os(macOS)
-                        .frame(width: 240)
-                        #endif
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -315,26 +312,21 @@ struct SettingsGroups: View {
         SettingsGroup(title: Copy.settingsDataHeader) {
             SettingsCard {
                 VStack(spacing: 0) {
-                    settingsRow(title: Copy.exportBackupTitle, help: Copy.exportBackupHelp) {
-                        Button(Copy.exportButton) { actions.beginJSONExport(store) }
-                            .buttonStyle(SecondaryButtonStyle())
-                            .disabled(store.isWorking)
-                            .accessibilityIdentifier("export-json")
-                    }
+                    settingsLinkRow(title: Copy.exportBackupTitle, help: Copy.exportBackupHelp,
+                                    identifier: "export-json") { actions.beginJSONExport(store) }
                     rowSeparator
-                    settingsRow(title: Copy.importBackupTitle, help: Copy.importBackupHelp) {
-                        Button(Copy.importButton) { actions.showJSONImporter = true }
-                            .buttonStyle(SecondaryButtonStyle())
-                            .disabled(store.isWorking)
-                            .accessibilityIdentifier("import-json")
-                    }
+                    settingsLinkRow(title: Copy.importBackupTitle, help: Copy.importBackupHelp,
+                                    identifier: "import-json") { actions.showJSONImporter = true }
                     rowSeparator
-                    settingsRow(title: Copy.clearAllTitle, help: Copy.clearAllHelp, titleColor: .neg) {
-                        Button(Copy.clearButton) { actions.clearConfirm = true }
-                            .buttonStyle(DangerButtonStyle())
-                            .disabled(store.isWorking)
-                            .accessibilityIdentifier("clear-all")
+                    // 清空：整行可点、红标题、无 chevron（保持危险态）。
+                    Button { actions.clearConfirm = true } label: {
+                        settingsRow(title: Copy.clearAllTitle, help: Copy.clearAllHelp, titleColor: .neg) {
+                            EmptyView()
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .disabled(store.isWorking)
+                    .accessibilityIdentifier("clear-all")
                 }
                 .padding(.vertical, 8)
             }
@@ -347,21 +339,13 @@ struct SettingsGroups: View {
         SettingsGroup(title: Copy.settingsEncryptedHeader) {
             SettingsCard {
                 VStack(spacing: 0) {
-                    settingsRow(title: Copy.encryptedBackupTitle, help: Copy.encryptedBackupHelp) {
-                        Button(Copy.exportSealedButton) { actions.beginSealedExport(store) }
-                            .buttonStyle(SecondaryButtonStyle())
-                            .disabled(store.isWorking)
-                            .accessibilityIdentifier("export-sealed")
-                    }
+                    settingsLinkRow(title: Copy.encryptedBackupTitle, help: Copy.encryptedBackupHelp,
+                                    identifier: "export-sealed") { actions.beginSealedExport(store) }
                     rowSeparator
-                    settingsRow(title: Copy.restoreEncryptedBackupTitle, help: Copy.restoreEncryptedBackupHelp) {
-                        Button(Copy.importSealedButton) { actions.showSealedImporter = true }
-                            .buttonStyle(SecondaryButtonStyle())
-                            .disabled(store.isWorking)
-                            .accessibilityIdentifier("import-sealed")
-                    }
+                    settingsLinkRow(title: Copy.restoreEncryptedBackupTitle, help: Copy.restoreEncryptedBackupHelp,
+                                    identifier: "import-sealed") { actions.showSealedImporter = true }
                     rowSeparator
-                    settingsRow(title: Copy.keyFingerprintLabel, help: Copy.keyLocation) {
+                    settingsRow(title: Copy.keyFingerprintLabel, help: nil) {
                         Text(store.keyFingerprint ?? Copy.keyNotGenerated)
                             .font(Ds.aux().monospaced())
                             .foregroundStyle(Color.text2)
@@ -372,17 +356,14 @@ struct SettingsGroups: View {
                     }
                     rowSeparator
                     settingsRow(title: Copy.recoveryCodeTitle, help: Copy.recoveryCodeHelp) {
-                        HStack(spacing: 8) {
-                            Button(Copy.exportRecoveryButton) { actions.beginRecoveryExport(store) }
-                                .buttonStyle(SecondaryButtonStyle())
-                                .disabled(store.isWorking)
-                                .accessibilityIdentifier("export-recovery")
-                            Button(Copy.importRecoveryButton) { actions.showRecoveryImporter = true }
-                                .buttonStyle(SecondaryButtonStyle())
-                                .disabled(store.isWorking)
-                                .accessibilityIdentifier("import-recovery")
-                        }
+                        EmptyView()
                     }
+                    rowSeparator
+                    settingsLinkRow(title: Copy.exportRecoveryButton, help: nil,
+                                    identifier: "export-recovery") { actions.beginRecoveryExport(store) }
+                    rowSeparator
+                    settingsLinkRow(title: Copy.importRecoveryButton, help: nil,
+                                    identifier: "import-recovery") { actions.showRecoveryImporter = true }
                 }
                 .padding(.vertical, 8)
             }
@@ -405,6 +386,22 @@ struct SettingsGroups: View {
 
     private var rowSeparator: some View {
         Rectangle().fill(Color.sep).frame(height: 1)
+    }
+
+    /// 整行可点的设置行（设计稿：标题+说明，行尾 chevron）。
+    private func settingsLinkRow(
+        title: String, help: String?, titleColor: Color = .ink,
+        identifier: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            settingsRow(title: title, help: help, titleColor: titleColor) {
+                AppIcon(name: "ic-chevron-right", size: 14)
+                    .foregroundStyle(Color.text2)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(store.isWorking)
+        .accessibilityIdentifier(identifier)
     }
 
     /// 设置行：标题正文 + 说明辅助 text2（最宽 360），右侧控件；双行行最小高 56。
@@ -817,9 +814,9 @@ struct SettingsFlowsModifier: ViewModifier {
                     Copy.recoveryExported(store.keyFingerprint ?? Copy.keyNotGenerated)
                 }
             }
-            // 移动确认框：系统 alert（§5.6）；Mac 确认框在各自宿主内自绘。
+            // 移动确认框：系统 alert（§5.6，居中；iPad 上 confirmationDialog 会变成锚定气泡）。
             #if os(iOS)
-            .confirmationDialog(Copy.clearConfirmationTitle, isPresented: $actions.clearConfirm, titleVisibility: .visible) {
+            .alert(Copy.clearConfirmationTitle, isPresented: $actions.clearConfirm, titleVisibility: .visible) {
                 Button(Copy.clearConfirm, role: .destructive) { actions.confirmClear(store) }
                 Button(Copy.cancel, role: .cancel) {}
             } message: {

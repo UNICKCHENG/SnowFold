@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - 弹层骨架
 
@@ -99,7 +102,8 @@ struct MobileSheetScaffold<Content: View>: View {
         }
         .background(Color.bg)
         .presentationDragIndicator(.visible)
-        .presentationDetents([.large])
+        // sheet 顶部与状态栏下缘对齐（设计稿 y=62）：高 = 屏高 − 62。
+        .presentationDetents([.height(UIScreen.main.bounds.height - 62)])
     }
 }
 #endif
@@ -409,9 +413,6 @@ struct AssetEditorSheet: View {
                 }
             }
             .padding(.horizontal, 16)
-        }
-        if case .balance = mode {
-            FormHelpLine(message: "变动会记入该资产的历史，保存后 6 秒内可撤销。")
         }
     }
 

@@ -5,6 +5,7 @@ struct SubscriptionsView: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.usesWideLayout) private var wideLayout
     @State private var renewFeedback = 0
     @State private var hoveredSubscriptionID: String?
     @FocusState private var focusedAction: String?
@@ -90,7 +91,8 @@ struct SubscriptionsView: View {
             }
         }
         return VStack(alignment: .leading, spacing: 0) {
-            if Ds.isDesktop && !typeSize.isAccessibilitySize {
+            // 宽屏（桌面/iPad）：三项同行底对齐（§9.4）；窄屏纵向堆叠。
+            if (Ds.isDesktop || wideLayout) && !typeSize.isAccessibilitySize {
                 HStack(alignment: .bottom, spacing: 40) {
                     due
                     spendingStat(Copy.monthlySpending, cny(totals, \.monthlyCents), usd(totals, \.monthlyCents))
@@ -223,11 +225,11 @@ struct SubscriptionsView: View {
                             .font(Ds.bodyMedium())
                             .foregroundStyle(active ? Color.ink : Color.text2)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(pending && !Ds.isDesktop ? overdueSubtitle(record)
+                        Text(pending && !(Ds.isDesktop || wideLayout) ? overdueSubtitle(record)
                              : "\(Copy.cycleLabel(record.cycle)) · \(Fmt.day(record.nextChargeOn))")
                             .font(Ds.aux())
                             .monospacedDigit()
-                            .foregroundStyle(pending && !Ds.isDesktop ? Color.neg : Color.text2)
+                            .foregroundStyle(pending && !(Ds.isDesktop || wideLayout) ? Color.neg : Color.text2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -241,31 +243,40 @@ struct SubscriptionsView: View {
                 cycle: Copy.cycleLabel(record.cycle), date: Fmt.day(record.nextChargeOn),
                 status: active ? "在订" : "已暂停"
             ))
-            if Ds.isDesktop {
-                let badge = Fmt.chargeBadge(for: record.nextChargeOn, today: Fmt.today)
-                let kind: BadgeKind = switch badge.kind {
-                case .danger: .danger
-                case .accent: .warn
-                case .neutral: .neutral
-                }
-                TagBadge(text: badge.text, kind: kind)
-                    .accessibilityHidden(badge.text.isEmpty)
+            if Ds.isDesktop || (wideLayout && !typeSize.isAccessibilitySize) {
+                // 宽屏行（§9.4）：徽标独立成列（逾期/今天 neg、{n} 天后 warn），金额右列；
+                // 桌面另带悬停动作列，iPad 待确认行右缘是「已续费」。
+                chargeBadge(record)
+                    .accessibilityHidden(chargeBadge(record).text.isEmpty)
                 MoneyText(cents: record.amountCents, currency: record.currency,
                           font: Ds.bodyMedium(), color: active ? .ink : .text2)
                     .frame(minWidth: 120, alignment: .trailing)
-                HStack {
-                    if pending {
-                        Button { renew(record) } label: {
-                            Text(Copy.markRenewed)
+                if Ds.isDesktop {
+                    HStack {
+                        if pending {
+                            Button { renew(record) } label: {
+                                Text(Copy.markRenewed)
+                            }
+                            .buttonStyle(SoftButtonStyle())
+                            .accessibilityLabel(Copy.markRenewed)
+                            .accessibilityIdentifier("renew-" + record.id)
+                        } else {
+                            desktopActions(record, active: active)
                         }
-                        .buttonStyle(SoftButtonStyle())
-                        .accessibilityLabel(Copy.markRenewed)
-                        .accessibilityIdentifier("renew-" + record.id)
-                    } else {
-                        desktopActions(record, active: active)
                     }
+                    .frame(width: 112, alignment: .trailing)
+                } else if pending {
+                    Button { renew(record) } label: {
+                        HStack(spacing: 6) {
+                            AppIcon(name: "ic-check", size: 14)
+                            Text("已续费")
+                        }
+                    }
+                    .buttonStyle(SoftButtonStyle())
+                    .frame(minHeight: 44)
+                    .accessibilityLabel(Copy.markRenewed)
+                    .accessibilityIdentifier("renew-" + record.id)
                 }
-                .frame(width: 112, alignment: .trailing)
             } else {
                 VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
                     MoneyText(cents: record.amountCents, currency: record.currency,
@@ -320,6 +331,17 @@ struct SubscriptionsView: View {
         parts.append(Copy.cycleLabel(record.cycle))
         parts.append(Fmt.day(record.nextChargeOn))
         return parts.joined(separator: " · ")
+    }
+
+    /// 行内徽标（§9.4）：今天/逾期 neg、{n} 天后 warn、其余 neutral（无底）。
+    private func chargeBadge(_ record: SubscriptionRecord) -> TagBadge {
+        let badge = Fmt.chargeBadge(for: record.nextChargeOn, today: Fmt.today)
+        let kind: BadgeKind = switch badge.kind {
+        case .danger: .danger
+        case .accent: .warn
+        case .neutral: .neutral
+        }
+        return TagBadge(text: badge.text, kind: kind)
     }
 
     /// 移动左滑：待确认行「已续费」（brand）+「删除」（neg）；其余「暂停/恢复」+「删除」。

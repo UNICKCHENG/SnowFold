@@ -493,38 +493,43 @@ struct SwipeableRow<Content: View>: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            HStack(spacing: 0) {
-                ForEach(Array(specs.enumerated()), id: \.element.title) { _, spec in
-                    Button {
-                        reset()
-                        spec.perform()
-                    } label: {
-                        VStack(spacing: 4) {
-                            AppIcon(name: spec.icon, size: 20)
-                            Text(spec.title)
-                                .font(Ds.auxMedium())
-                        }
-                        .foregroundStyle(Color.onBrand)
-                        .frame(width: 88, height: 64)
-                        .background(spec.tint)
-                        .contentShape(Rectangle())
+        // 动作列垫在行底下（trailing 对齐、与行同高），行底 cardBg 遮住它；
+        // offset 只滑行本体，静止时右缘不露动作色，左滑才露出（设计稿左滑删除）。
+        content()
+            .background(Color.cardBg)
+            .offset(x: offset)
+            .background(alignment: .trailing) { actionButtons }
+            .simultaneousGesture(swipe)
+            .background(
+                // 点击行其他位置或滚动后收起。
+                Color.clear.contentShape(Rectangle())
+                    .onTapGesture { reset() }
+            )
+            .clipped()
+    }
+
+    /// 左滑动作列：高随行内容（不再固定 64，避免行高 52 的资产行上下露边）。
+    private var actionButtons: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(specs.enumerated()), id: \.element.title) { _, spec in
+                Button {
+                    reset()
+                    spec.perform()
+                } label: {
+                    VStack(spacing: 4) {
+                        AppIcon(name: spec.icon, size: 20)
+                        Text(spec.title)
+                            .font(Ds.auxMedium())
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(spec.title)
+                    .foregroundStyle(Color.onBrand)
+                    .frame(width: 88, maxHeight: .infinity)
+                    .background(spec.tint)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(spec.title)
             }
-            content()
-                .background(Color.cardBg)
-                .offset(x: offset)
-                .simultaneousGesture(swipe)
-                .background(
-                    // 点击行其他位置或滚动后收起。
-                    Color.clear.contentShape(Rectangle())
-                        .onTapGesture { reset() }
-                )
         }
-        .clipped()
     }
 
     private var swipe: some Gesture {
@@ -560,7 +565,8 @@ struct SwipeableRow<Content: View>: View {
 
 // MARK: - 表单行与输入（§5.2）
 
-/// 输入框：card 底、1px sep、圆角 10、左右 10；占位符 text2。
+/// 输入框：默认态无框无底（§6 行样式，设计稿 sheet 表单为「标签+无框值」）；
+/// 聚焦描 brand 1.5、出错描 neg 1.5；左右 10 保证描边不贴文字。
 struct DSInputStyle: ViewModifier {
     @FocusState.Binding var focused: Bool
     var hasError = false
@@ -569,11 +575,10 @@ struct DSInputStyle: ViewModifier {
         content
             .padding(.horizontal, 10)
             .frame(minHeight: Ds.fieldHeight)
-            .background(Color.cardBg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(hasError ? Color.neg : (focused ? Color.brand : Color.sep),
-                                  lineWidth: focused || hasError ? 1.5 : 1)
+                    .strokeBorder(hasError ? Color.neg : (focused ? Color.brand : .clear),
+                                  lineWidth: focused || hasError ? 1.5 : 0)
             )
     }
 }

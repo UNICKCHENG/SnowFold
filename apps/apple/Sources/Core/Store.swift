@@ -115,10 +115,8 @@ final class SnowFoldStore {
                 keyFingerprint = try await background { try core.keyFingerprint() }
                 keyUnavailable = false
             } catch {
+                // 只置位警示卡（总览页承载），不再重复弹通知。
                 keyUnavailable = true
-                if notice == nil {
-                    showErrorNotice(Copy.startupKeyUnavailable(Copy.userMessage(for: error)))
-                }
             }
             do {
                 try await background { try core.startupBackup() }

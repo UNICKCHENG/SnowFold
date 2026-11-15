@@ -246,7 +246,8 @@ struct OverviewView: View {
                             .font(Ds.aux())
                             .monospacedDigit()
                             .foregroundStyle(Color.text2)
-                            .frame(width: 44, alignment: .trailing)
+                            .fixedSize()
+                            .frame(minWidth: 44, alignment: .trailing)
                     }
                 }
             }

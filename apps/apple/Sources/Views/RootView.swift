@@ -120,7 +120,12 @@ struct RootView: View {
                 #if os(macOS)
                 SplitRootView(startupFailure: message)
                 #else
-                StartupFailureView(message: message)
+                // 失败态仍走正常根 chrome（设计稿：iPhone 保留导航标题，iPad 保留侧边栏+工具栏）。
+                if UIDevice.current.userInterfaceIdiom == .pad, sizeClass == .regular {
+                    SplitRootView(startupFailure: message)
+                } else {
+                    PhoneRootView(startupFailure: message)
+                }
                 #endif
             case .ready:
                 readyContent
@@ -231,31 +236,66 @@ struct StartupFailureView: View {
 struct PhoneRootView: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
+    /// 启动失败时保留标签栏与导航 chrome，仅内容区换成失败视图。
+    var startupFailure: String? = nil
 
     var body: some View {
         @Bindable var router = router
         TabView(selection: $router.tab) {
-            NavigationStack { OverviewView() }
+            NavigationStack {
+                if let startupFailure {
+                    StartupFailureView(message: startupFailure)
+                        .navigationTitle(Copy.overviewTitle)
+                        .phoneInlineTitle()
+                } else {
+                    OverviewView()
+                }
+            }
                 .bannerOverlay()
                 .tabItem { tabLabel("ic-pie-chart", Copy.overviewTitle) }
                 .tag(Router.Tab.overview)
                 .accessibilityIdentifier("nav-overview")
-            NavigationStack { AssetsView() }
+            NavigationStack {
+                if let startupFailure {
+                    StartupFailureView(message: startupFailure)
+                        .navigationTitle(Copy.assetsTitle)
+                        .phoneInlineTitle()
+                } else {
+                    AssetsView()
+                }
+            }
                 .bannerOverlay()
                 .tabItem { tabLabel("ic-wallet", Copy.assetsTab) }
                 .tag(Router.Tab.assets)
                 .accessibilityIdentifier("nav-assets")
-            NavigationStack { SubscriptionsView() }
+            NavigationStack {
+                if let startupFailure {
+                    StartupFailureView(message: startupFailure)
+                        .navigationTitle(Copy.subscriptionsTitle)
+                        .phoneInlineTitle()
+                } else {
+                    SubscriptionsView()
+                }
+            }
                 .bannerOverlay()
                 .tabItem { tabLabel("ic-calendar-repeat", Copy.subscriptionsTitle) }
                 .tag(Router.Tab.subscriptions)
                 .accessibilityIdentifier("nav-subscriptions")
-            NavigationStack { SettingsView() }
+            NavigationStack {
+                if let startupFailure {
+                    StartupFailureView(message: startupFailure)
+                        .navigationTitle(Copy.settingsTitle)
+                        .phoneInlineTitle()
+                } else {
+                    SettingsView()
+                }
+            }
                 .bannerOverlay()
                 .tabItem { tabLabel("ic-settings", Copy.settingsTitle) }
                 .tag(Router.Tab.settings)
                 .accessibilityIdentifier("nav-settings")
         }
+        .disabled(startupFailure != nil)
         .tint(.brand)
         .sheet(item: Binding(
             get: { router.modal },
@@ -274,20 +314,24 @@ struct PhoneRootView: View {
     }
 }
 
-/// iOS 弹层容器：mobile-layout.md §6 的底部 sheet；iPad 居中表单宽 540。
+/// iOS 弹层容器（sheet 呈现）：iPhone 底部 sheet；iPad 分屏窄时同 iPhone。
 struct ModalSheet: View {
     let modal: Modal
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        sheetContent
+        ModalContent(modal: modal)
             .frame(maxWidth: sizeClass == .regular ? 540 : nil)
             .frame(maxWidth: .infinity)
         // 弹层背景与背后的系统遮罩交给系统：Liquid Glass 材质 + 自动层级抬升。
     }
+}
 
-    @ViewBuilder
-    private var sheetContent: some View {
+/// 弹层表单本体：sheet 与 iPad 居中卡共用。
+struct ModalContent: View {
+    let modal: Modal
+
+    var body: some View {
         switch modal {
         case .newAsset(let code):
             AssetEditorSheet(mode: .new(categoryCode: code))
@@ -301,6 +345,27 @@ struct ModalSheet: View {
             SubscriptionEditorSheet(mode: .new)
         case .editSubscription(let record):
             SubscriptionEditorSheet(mode: .edit(record))
+        }
+    }
+}
+
+/// iPad 居中弹层卡（设计稿：宽 540、高度随内容、无抓手），形态同桌面 §5.6。
+struct IpadDialogCard: View {
+    let modal: Modal
+    @Environment(Router.self) private var router
+
+    var body: some View {
+        ZStack {
+            (Color.ink.opacity(0.32))
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { router.modal = nil }
+            ModalContent(modal: modal)
+                .frame(width: 540)
+                // 高度随内容（最小即内容高）；内容过长时由内部 ScrollView 兜底滚动。
+                .fixedSize(horizontal: false, vertical: true)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .shadow(color: .black.opacity(0.14), radius: 32, y: 8)
         }
     }
 }
@@ -333,14 +398,10 @@ struct PhoneOnlyToolbar<Actions: View>: ViewModifier {
 }
 
 struct PhoneOnlyInlineTitle: ViewModifier {
-    @Environment(\.usesWideLayout) private var wide
     func body(content: Content) -> some View {
         #if os(iOS)
-        if wide {
-            content
-        } else {
-            content.navigationBarTitleDisplayMode(.inline)
-        }
+        // iPad 与 iPhone 一致用行内标题：设计稿标题与右侧按钮同行（17pt），不用系统大标题。
+        content.navigationBarTitleDisplayMode(.inline)
         #else
         content
         #endif
@@ -526,6 +587,7 @@ struct AssetsSplitView: View {
             #endif
         }
             .navigationTitle(Copy.assetsTitle)
+            .phoneInlineTitle()
             .background(Color.bg)
     }
 
@@ -555,14 +617,16 @@ struct AssetsSplitView: View {
 }
 
 /// 页面工具栏动作：同步（开启后）与「＋」；Mac/iPad 由分栏容器挂载。
+/// 手机总览不放「＋」（mobile-layout §2）；宽屏总览保留（设计稿 iPad/Mac 有）。
 struct PageToolbarActions: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
+    @Environment(\.usesWideLayout) private var wideLayout
 
     var body: some View {
         HStack(spacing: 8) {
             SyncToolbarButton()
-            if router.tab == .assets || router.tab == .overview {
+            if router.tab == .assets || (router.tab == .overview && wideLayout) {
                 ToolbarPlusButton(icon: "ic-plus", label: Copy.addAsset, identifier: "new-asset") {
                     router.modal = .newAsset(categoryCode: router.focusAssetCategory ?? "cash")
                 }
@@ -599,6 +663,7 @@ struct ToolbarPlusButton: View {
 struct SplitModalPresenter: ViewModifier {
     @Environment(Router.self) private var router
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.usesWideLayout) private var wideLayout
 
     func body(content: Content) -> some View {
         #if os(macOS)
@@ -616,13 +681,25 @@ struct SplitModalPresenter: ViewModifier {
             }
             .animation(.easeOut(duration: 0.15), value: router.modal?.id)
         #else
-        content
-            .sheet(item: Binding(
-                get: { router.modal },
-                set: { router.modal = $0 }
-            )) { modal in
-                ModalSheet(modal: modal)
-            }
+        if wideLayout {
+            // iPad 常规宽度：居中卡片（宽 540、高随内容、无抓手），点外部关闭。
+            content
+                .overlay {
+                    if let modal = router.modal {
+                        IpadDialogCard(modal: modal)
+                            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    }
+                }
+                .animation(.easeOut(duration: 0.15), value: router.modal?.id)
+        } else {
+            content
+                .sheet(item: Binding(
+                    get: { router.modal },
+                    set: { router.modal = $0 }
+                )) { modal in
+                    ModalSheet(modal: modal)
+                }
+        }
         #endif
     }
 }

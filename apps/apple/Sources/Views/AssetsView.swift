@@ -180,6 +180,7 @@ struct AssetsListView: View {
                 Text(asset.name)
                     .font(Ds.body())
                     .foregroundStyle(Color.ink)
+                    .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
@@ -293,7 +294,8 @@ struct AssetsOverviewPane: View {
                                         .font(Ds.aux())
                                         .monospacedDigit()
                                         .foregroundStyle(Color.text2)
-                                        .frame(width: 44, alignment: .trailing)
+                                        .fixedSize()
+                                        .frame(minWidth: 44, alignment: .trailing)
                                 }
                                 .padding(.leading, 56)
                                 .padding(.trailing, 16)
@@ -428,10 +430,15 @@ struct AssetDetailView: View {
 
     private func historySection(_ asset: AssetRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: Copy.historySection, count: history.count) {
+            // 设计稿：说明紧跟标题、不带计数（区别于分组头）。
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(Copy.historySection)
+                    .font(Ds.sectionTitle())
+                    .foregroundStyle(Color.ink)
                 Text(Copy.historyNote)
                     .font(Ds.aux())
                     .foregroundStyle(Color.text2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Card {
                 if history.isEmpty {
