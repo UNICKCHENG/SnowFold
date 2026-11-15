@@ -3,25 +3,8 @@ import SwiftUI
 import UIKit
 #endif
 
-// MARK: - 路由与弹层
-
-/// 页面路由：iPhone 切换 TabView，iPad/Mac 切侧边栏选择；Mac 设置走独立窗口。
-@MainActor
-@Observable
-final class Router {
-    enum Tab: String, CaseIterable, Identifiable {
-        case overview, assets, subscriptions, settings
-        var id: String { rawValue }
-    }
-
-    var tab: Tab = .overview
-    /// 从总览分类卡跳到资产页并定位到该分类。
-    var focusAssetCategory: String?
-    /// 统一弹层入口：iOS 呈现为 sheet，macOS 呈现为居中弹层。
-    var modal: Modal?
-    /// Mac 设置窗口当前页签（Cmd+, 独立窗口）。
-    var settingsTab: MacSettingsTab = .general
-}
+// MARK: - 弹层与设置窗口类型
+// Router 与 UndoState 声明在 Store.swift（模型层），此处只放界面侧扩展类型。
 
 /// Mac 设置窗口的四个页签（design.md §9.6）。
 enum MacSettingsTab: String, CaseIterable, Identifiable {
@@ -66,13 +49,6 @@ enum Modal: Identifiable {
         case .editSubscription(let record): return "edit-\(record.id)"
         }
     }
-}
-
-/// 可撤销横幅：令牌来自核心，validForMs 内有效。
-struct UndoState: Equatable {
-    let token: String
-    let message: String
-    let deadline: Date
 }
 
 // MARK: - 菜单命令桥
@@ -196,7 +172,8 @@ struct RootView: View {
         if value("-SNOWFOLD_SHOT_DIALOG") == "sub-edit",
            let record = store.ledger.subscriptions.first { router.modal = .editSubscription(record) }
         if arguments.contains("-SNOWFOLD_SHOT_NOTICE") {
-            try? await Task.sleep(for: .seconds(0.3))
+            // 延后到截图窗口之前再显示（成功通知 4 秒后自动消失）。
+            try? await Task.sleep(for: .seconds(2))
             store.showNotice(Copy.backupExported)
         }
         if arguments.contains("-SNOWFOLD_SHOT_UNDO"),

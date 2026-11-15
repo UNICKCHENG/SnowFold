@@ -11,10 +11,12 @@ final class Router {
     }
 
     var tab: Tab = .overview
-    /// iPhone 设置 sheet 呈现状态；Mac 用 Settings 场景，不经过这里。
-    var settingsPresented = false
     /// 从总览分类卡跳到资产页并定位到该分类。
     var focusAssetCategory: String?
+    /// 统一弹层入口：iOS 呈现为 sheet，macOS 呈现为居中弹层（见 Views/RootView.swift）。
+    var modal: Modal?
+    /// Mac 设置窗口当前页签（Cmd+, 独立窗口）。
+    var settingsTab: MacSettingsTab = .general
 }
 
 /// 可撤销横幅：令牌来自核心，validForMs 内有效。
@@ -75,6 +77,8 @@ final class SnowFoldStore {
     private let keyStore: SecureKeyStore
     private var undoExpiryTask: Task<Void, Never>?
     private var highlightTask: Task<Void, Never>?
+    /// 成功通知 4 秒自动消失（design.md §5.8）；错误通知手动关闭。
+    private var noticeTask: Task<Void, Never>?
 
     init(dataDirectory: URL? = nil, keyStore: SecureKeyStore = KeychainKeyStore(),
          syncTransport: any SyncTransport = URLSessionSyncTransport(),
@@ -261,6 +265,8 @@ final class SnowFoldStore {
     }
 
     func dismissNotice() {
+        noticeTask?.cancel()
+        noticeTask = nil
         notice = nil
     }
 
@@ -268,6 +274,15 @@ final class SnowFoldStore {
     func showNotice(_ message: String, isError: Bool = false) {
         notice = message
         noticeIsError = isError
+        noticeTask?.cancel()
+        if !isError {
+            let message = message
+            noticeTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(4))
+                guard !Task.isCancelled, let self, self.notice == message else { return }
+                self.dismissNotice()
+            }
+        }
     }
 
     /// 错误通知：warning-triangle 样式，需手动关闭。
