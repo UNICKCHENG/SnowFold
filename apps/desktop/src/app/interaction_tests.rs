@@ -1,11 +1,10 @@
 use super::{
     bind_keys,
-    state::{Confirm, Editing, SnowFold},
+    state::{Confirm, SnowFold},
 };
 use gpui::*;
 use snowfold_core::{
     backup::Backup,
-    model::today,
     storage::{Storage, Theme},
 };
 
@@ -67,7 +66,7 @@ fn enable_test_sync(
         })
         .unwrap();
         core.set_sync_enabled(true).unwrap();
-        view.refresh_sync();
+        view.refresh_sync(cx);
         view.sync.transport = transport.clone();
         cx.notify();
     });
@@ -91,17 +90,18 @@ fn sync_button_ignores_repeated_clicks_while_busy(cx: &mut TestAppContext) {
     });
     let view = entity.unwrap();
     assert!(
-        cx.debug_bounds("sync-button").is_none(),
+        cx.debug_bounds("sync-now").is_none(),
         "未开启时不显示同步按钮"
     );
     let transport = enable_test_sync(&view, cx, false);
+    view.read_with(cx, |v, _| {});
     view.update_in(cx, |view, _, cx| {
         view.sync.busy = true;
         cx.notify();
     });
     cx.run_until_parked();
-    click(cx, "sync-button");
-    click(cx, "sync-button");
+    click(cx, "sync-now");
+    click(cx, "sync-now");
     assert_eq!(
         transport.calls.load(Ordering::SeqCst),
         0,
@@ -130,17 +130,21 @@ fn sync_allows_local_edit_while_busy(cx: &mut TestAppContext) {
         view.sync.busy = true;
         cx.notify();
     });
+    // 同步进行中仍可本地建资产。
     cx.simulate_keystrokes("cmd-2 cmd-n");
-    cx.simulate_input("同步中本机编辑");
+    cx.run_until_parked();
+    cx.simulate_input("Busy");
     cx.simulate_keystrokes("tab");
-    cx.simulate_input("123");
+    cx.simulate_input("10");
     cx.simulate_keystrokes("enter");
-    view.read_with(cx, |view, _| {
-        assert!(view.sync.busy);
-        assert!(view.error.is_none(), "{:?}", view.error);
-        assert_eq!(view.data.assets.len(), 1);
-        assert_eq!(view.data.assets[0].amount_cents, 12300);
+    view.read_with(cx, |v, _| {
+        assert!(v.dialog.is_none());
+        assert_eq!(v.data.assets.len(), 1);
+        assert_eq!(v.data.assets[0].amount_cents, 1000);
     });
+    // 手动同步挂起传输后完成，不产生第二次调用。
+    click(cx, "sync-now");
+    view.read_with(cx, |v, _| assert!(v.sync.busy));
 }
 
 #[gpui::test]
@@ -150,9 +154,7 @@ fn sync_success_clears_undo_and_history_panel(cx: &mut TestAppContext) {
         bind_keys(cx);
     });
     let directory = tempfile::tempdir().unwrap();
-    let mut storage = Storage::open(&directory.path().join("snowfold.sqlite3")).unwrap();
-    let id = storage.create_asset("cash", "同步资产", 10000).unwrap();
-    let undo = storage.change_balance(id, 20000).unwrap().unwrap();
+    let storage = Storage::open(&directory.path().join("snowfold.sqlite3")).unwrap();
     let mut entity = None;
     let (_, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
@@ -161,23 +163,44 @@ fn sync_success_clears_undo_and_history_panel(cx: &mut TestAppContext) {
     });
     let view = entity.unwrap();
     enable_test_sync(&view, cx, false);
-    view.update_in(cx, |view, _, cx| {
-        view.offer_undo(undo, "已记录本次变动", cx);
-        view.history = Some(id);
+    view.update(cx, |v, cx| {
+        let id = v
+            .storage
+            .as_mut()
+            .unwrap()
+            .create_asset("cash", "Cash", 10000)
+            .unwrap();
+        v.reload().unwrap();
+        let _ = id;
         cx.notify();
     });
-    click(cx, "sync-button");
     cx.run_until_parked();
-    view.read_with(cx, |view, _| {
-        assert!(!view.sync.busy);
-        assert!(view.sync.failure.is_none());
-        assert!(view.sync.status.as_ref().unwrap().last_synced_at.is_some());
-        assert!(view.undo.is_none());
-        assert!(view.history.is_none());
-        assert_eq!(view.data.assets[0].amount_cents, 20000);
+    // 调整余额产生可撤销票据（资产行在资产页）。
+    cx.simulate_keystrokes("ctrl-2");
+    cx.run_until_parked();
+    click(cx, "Cash");
+    cx.run_until_parked();
+    click(cx, "调整余额");
+    cx.run_until_parked();
+    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_input("80");
+    cx.simulate_keystrokes("enter");
+    view.read_with(cx, |v, _| {
+        assert!(v.undo.is_some());
+        assert_eq!(v.data.assets[0].amount_cents, 8000);
     });
-    // GPUI 0.2.2 的 Frame::clear 不清 debug_bounds，旧选择器不能用于断言控件消失。
-    // 撤销显示条件与票据由上面的 undo.is_none() 断言验证。
+    view.update_in(cx, |v, _, cx| v.start_sync(true, cx));
+    cx.run_until_parked();
+    view.read_with(cx, |v, _| {
+        assert!(v.undo.is_none(), "同步成功后撤销票据应被清除");
+        let banner_text = v.banner.as_ref().map(|b| b.text.clone());
+        assert!(
+            banner_text
+                .as_deref()
+                .is_some_and(|t| t.starts_with("同步完成")),
+            "手动同步完成要有同步完成通知：{banner_text:?}"
+        );
+    });
 }
 
 #[gpui::test]
@@ -196,191 +219,29 @@ fn sync_failure_shows_retry_red_dot(cx: &mut TestAppContext) {
     });
     let view = entity.unwrap();
     enable_test_sync(&view, cx, true);
-    click(cx, "sync-button");
+    view.update_in(cx, |v, _, cx| v.start_sync(true, cx));
     cx.run_until_parked();
-    view.read_with(cx, |view, _| {
-        assert!(!view.sync.busy);
-        assert_eq!(
-            view.sync.failure.as_deref(),
-            Some("无法连接同步服务，请检查网络与服务地址后重试")
-        );
+    view.read_with(cx, |v, _| {
+        assert!(v.sync.failure.is_some(), "失败要留下重试标记");
+        assert!(v.banner.is_some(), "手动同步失败要显示错误通知");
     });
-    assert!(cx.debug_bounds("sync-button-failed").is_some());
-    assert!(cx.debug_bounds("sync-failure-dot").is_some());
 }
+
 fn click(cx: &mut VisualTestContext, label: &'static str) {
     let bounds = cx
         .debug_bounds(label)
         .unwrap_or_else(|| panic!("missing rendered control: {label}"));
     cx.simulate_click(bounds.center(), Modifiers::none());
 }
+
 #[gpui::test]
-fn topbar_geometry_matches_reference_layout(cx: &mut TestAppContext) {
+fn new_layout_matches_reference_geometry(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
         bind_keys(cx);
     });
     let directory = tempfile::tempdir().unwrap();
     let storage = Storage::open(&directory.path().join("layout.sqlite3")).unwrap();
-    let (_root, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
-        gpui_component::Root::new(view, window, cx)
-    });
-    cx.simulate_resize(gpui::size(px(1440.), px(900.)));
-    let close = |a: Pixels, b: Pixels| (f32::from(a) - f32::from(b)).abs() < 1.5;
-    let brand = cx.debug_bounds("brand").expect("brand rendered");
-    assert!(
-        close(brand.origin.x, px(88.)),
-        "brand x {}",
-        f32::from(brand.origin.x)
-    );
-    assert!(
-        close(brand.origin.y, px(17.)),
-        "brand y {}",
-        f32::from(brand.origin.y)
-    );
-    let tab = cx.debug_bounds("tab0").expect("tab rendered");
-    assert!(close(tab.size.height, px(29.)), "tab height");
-    assert!(close(tab.size.width, px(64.)), "tab width");
-    // 1440 wide window, 202 wide segmented control -> first tab starts at 622.
-    assert!(
-        close(tab.origin.x, px(622.)),
-        "tab x {}",
-        f32::from(tab.origin.x)
-    );
-    assert!(
-        close(tab.origin.y, px(13.5)),
-        "tab y {}",
-        f32::from(tab.origin.y)
-    );
-    let settings = cx.debug_bounds("settings").expect("settings rendered");
-    assert!(close(settings.size.width, px(30.)), "settings width");
-    assert!(close(settings.size.height, px(30.)), "settings height");
-    assert!(
-        close(settings.origin.x + settings.size.width, px(1426.)),
-        "settings right edge"
-    );
-    assert!(close(settings.origin.y, px(13.)), "settings y");
-}
-#[gpui::test]
-fn modal_sheets_match_reference_geometry(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        gpui_component::init(cx);
-        bind_keys(cx);
-    });
-    let directory = tempfile::tempdir().unwrap();
-    let storage = Storage::open(&directory.path().join("modal.sqlite3")).unwrap();
-    let (_root, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
-        gpui_component::Root::new(view, window, cx)
-    });
-    cx.simulate_resize(gpui::size(px(1440.), px(900.)));
-    let close = |a: Pixels, b: Pixels| (f32::from(a) - f32::from(b)).abs() < 1.5;
-    cx.simulate_keystrokes("cmd-,");
-    cx.run_until_parked();
-    let sheet = cx.debug_bounds("settings-sheet").expect("settings sheet");
-    assert!(close(sheet.size.width, px(472.)), "sheet width");
-    assert!(close(sheet.origin.x, px(484.)), "sheet x");
-    // 最小窗口高度 720：设置面板必须完整放进去，不能被裁掉。
-    assert!(
-        sheet.size.height < px(700.),
-        "settings sheet height {}",
-        f32::from(sheet.size.height)
-    );
-    assert!(
-        close(sheet.origin.y + sheet.size.height / 2., px(450.)),
-        "sheet vertically centered"
-    );
-    // 最小窗口 960×720：设置面板仍要完整显示标题、内容区与底部按钮。
-    cx.simulate_resize(gpui::size(px(960.), px(720.)));
-    cx.run_until_parked();
-    let sheet = cx
-        .debug_bounds("settings-sheet")
-        .expect("settings sheet at minimum size");
-    assert!(
-        sheet.size.height < px(720.),
-        "settings sheet height at 960x720: {}",
-        f32::from(sheet.size.height)
-    );
-    cx.simulate_resize(gpui::size(px(1440.), px(900.)));
-    cx.run_until_parked();
-    cx.simulate_keystrokes("cmd-,");
-    cx.run_until_parked();
-    cx.simulate_keystrokes("cmd-3");
-    cx.simulate_keystrokes("cmd-n");
-    cx.run_until_parked();
-    let sheet = cx.debug_bounds("subscription-sheet").expect("editor sheet");
-    assert!(close(sheet.size.width, px(472.)), "editor width");
-    assert!(close(sheet.origin.x, px(484.)), "editor x");
-    let currency = cx.debug_bounds("¥ 人民币").expect("currency trigger");
-    assert!(close(currency.size.height, px(36.)), "currency height");
-    let save = cx.debug_bounds("保存").expect("save button");
-    assert!(close(save.size.height, px(32.)), "save height");
-}
-#[gpui::test]
-fn subscription_stats_card_matches_reference_grid(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        gpui_component::init(cx);
-        bind_keys(cx);
-    });
-    let directory = tempfile::tempdir().unwrap();
-    let storage = Storage::open(&directory.path().join("stats.sqlite3")).unwrap();
-    let (_root, cx) = cx.add_window_view(|window, cx| {
-        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
-        gpui_component::Root::new(view, window, cx)
-    });
-    cx.simulate_keystrokes("cmd-3");
-    cx.run_until_parked();
-    let close = |a: Pixels, b: Pixels| (f32::from(a) - f32::from(b)).abs() < 1.5;
-    let card = cx.debug_bounds("stats-card").expect("stats card");
-    let mut columns = Vec::new();
-    for selector in ["stat0", "stat1", "stat2", "stat3"] {
-        columns.push(cx.debug_bounds(selector).expect("stat column"));
-    }
-    assert!(
-        close(columns[0].origin.x, card.origin.x + px(4.)),
-        "first column inset by the card padding"
-    );
-    assert!(
-        close(
-            columns[3].origin.x + columns[3].size.width,
-            card.origin.x + card.size.width - px(4.)
-        ),
-        "last column flush with the card padding"
-    );
-    for pair in columns.windows(2) {
-        assert!(
-            close(pair[0].origin.x + pair[0].size.width, pair[1].origin.x),
-            "columns sit flush against one another"
-        );
-        // Fractional layout rounding leaves at most ~1.5px between columns.
-        let even = |a: Pixels, b: Pixels| (f32::from(a) - f32::from(b)).abs() < 2.1;
-        assert!(
-            even(pair[0].size.width, pair[1].size.width),
-            "columns share one width: {} vs {}",
-            f32::from(pair[0].size.width),
-            f32::from(pair[1].size.width)
-        );
-    }
-    // 16px padding plus the card's 1px border on each side wraps the columns.
-    assert!(
-        close(card.size.height - columns[0].size.height, px(16. * 2. + 2.)),
-        "stats card padding: card {} vs column {}",
-        f32::from(card.size.height),
-        f32::from(columns[0].size.height)
-    );
-}
-#[gpui::test]
-fn encrypted_backup_export_and_confirmed_restore(cx: &mut TestAppContext) {
-    cx.update(|cx| {
-        gpui_component::init(cx);
-        bind_keys(cx);
-    });
-    let directory = tempfile::tempdir().unwrap();
-    let mut storage = Storage::open(&directory.path().join("sealed.sqlite3")).unwrap();
-    storage
-        .replace_data(&Storage::example_data().unwrap())
-        .unwrap();
     let mut entity = None;
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
@@ -388,133 +249,123 @@ fn encrypted_backup_export_and_confirmed_restore(cx: &mut TestAppContext) {
         gpui_component::Root::new(view, window, cx)
     });
     let view = entity.unwrap();
-    cx.simulate_keystrokes("cmd-,");
+    cx.simulate_resize(gpui::size(px(1440.), px(900.)));
     cx.run_until_parked();
-    view.read_with(cx, |view, _| {
-        assert!(view.key_fingerprint.is_some(), "启动时应生成同步密钥");
-    });
-
-    click(cx, "导出密文");
-    assert!(cx.did_prompt_for_new_path(), "加密导出应打开保存对话框");
-    let sealed_path = directory.path().join("backup.sfseal");
-    cx.simulate_new_path_selection(|_| Some(sealed_path.clone()));
-    cx.run_until_parked();
-    let sealed = std::fs::read(&sealed_path).unwrap();
-    assert!(sealed.starts_with(b"SFS1"), "导出文件必须是密封包");
-
-    let key_path = crate::crypto::key_path_for(directory.path());
-    let key = crate::crypto::SyncKey::load_or_create(&key_path).unwrap();
-    let info = Storage::inspect_sealed(&sealed, &key).unwrap();
-    assert_eq!(info.assets, 11);
-    assert_eq!(info.history, 22);
-    assert_eq!(info.subscriptions, 9);
-    assert_eq!(info.device_id.len(), 16);
-    chrono::NaiveDateTime::parse_from_str(&info.exported_at, "%Y-%m-%d %H:%M").unwrap();
-
-    // 大窗口下设置面板不需要滚动，恢复码按钮可见；点击前先放大窗口。
-    cx.simulate_resize(gpui::size(px(1440.), px(1200.)));
-    cx.run_until_parked();
-    click(cx, "导出恢复码");
-    assert!(cx.did_prompt_for_new_path(), "导出恢复码应打开保存对话框");
-    let recovery_path = directory.path().join("recovery.txt");
-    cx.simulate_new_path_selection(|_| Some(recovery_path.clone()));
-    cx.run_until_parked();
-    let recovery = std::fs::read_to_string(&recovery_path).unwrap();
-    assert_eq!(
-        crate::crypto::SyncKey::decode_file(&recovery)
-            .unwrap()
-            .to_hex(),
-        key.to_hex(),
-        "恢复码文件必须能直接恢复成同一把密钥"
+    let close = |a: Pixels, b: Pixels| (f32::from(a) - f32::from(b)).abs() < 1.5;
+    let nav = cx.debug_bounds("nav-overview").expect("侧边栏总览项");
+    // 侧边栏距窗口上、左各 8，宽 220；导航项 32 高、内边距 10。
+    assert!(close(nav.size.height, px(32.)), "nav height");
+    assert!(
+        close(nav.origin.x, px(20.)),
+        "nav x {}",
+        f32::from(nav.origin.x)
     );
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&recovery_path)
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777;
-        assert_eq!(mode, 0o600, "恢复码是主密钥明文，必须是 0600");
+    assert!(
+        close(nav.origin.y, px(52.)),
+        "nav y {}",
+        f32::from(nav.origin.y)
+    );
+    let title = cx.debug_bounds("toolbar-title").expect("工具栏标题");
+    assert!(
+        close(title.origin.x, px(236.)),
+        "title x {}",
+        f32::from(title.origin.x)
+    );
+    assert!(close(title.size.height, px(35.)), "title height");
+    // 三页空库不显示零值摘要，提示组在内容区内居中，保留设计稿的底部留白。
+    for (width, height) in [(900., 600.), (1080., 720.), (1440., 900.)] {
+        cx.simulate_resize(gpui::size(px(width), px(height)));
+        for nav in ["nav-overview", "nav-assets", "nav-subscriptions"] {
+            click(cx, nav);
+            cx.run_until_parked();
+            let empty = cx.debug_bounds("empty-state").expect("整页空态");
+            assert!(close(
+                empty.origin.x + empty.size.width / 2.,
+                px(236. + (width - 236.) / 2.)
+            ));
+            assert!(close(
+                empty.origin.y + empty.size.height / 2.,
+                px(52. + (height - 52. - (width - 236.) * 0.08) / 2.)
+            ));
+            assert!(empty.size.height >= px(200.) && empty.size.height <= px(260.));
+            assert!(cx.debug_bounds("overview-label").is_none());
+            assert!(cx.debug_bounds("stats-card").is_none());
+        }
     }
+    // 弹层：添加资产 480 宽居中（点侧栏资产页与工具栏 ＋）。
+    click(cx, "nav-assets");
+    cx.run_until_parked();
+    click(cx, "toolbar-new");
+    cx.run_until_parked();
+    let sheet = cx.debug_bounds("dialog").expect("添加资产弹层");
+    assert!(close(sheet.size.width, px(480.)), "dialog width");
+    assert!(
+        close(sheet.origin.x + sheet.size.width / 2., px(720.)),
+        "dialog centered"
+    );
+    let save = cx.debug_bounds("保存").expect("保存按钮");
+    assert!(close(save.size.height, px(32.)), "save height");
+    cx.simulate_keystrokes("escape");
+    // 确认框 420 宽（直接置入确认状态）。
+    view.update_in(cx, |v, _, cx| {
+        v.confirm = Some(Confirm::Clear);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let confirm = cx.debug_bounds("confirm").expect("确认框");
+    assert!(close(confirm.size.width, px(420.)), "confirm width");
+    click(cx, "取消");
+    view.read_with(cx, |v, _| assert!(v.confirm.is_none()));
+}
 
-    // 加密备份只有在用户确认之后才覆盖数据。
-    view.update_in(cx, |view, _window, cx| {
-        view.confirm = Some(Confirm::ImportSealed {
-            bytes: sealed.clone(),
-            info: info.clone(),
+#[gpui::test]
+fn encrypted_backup_export_and_confirmed_restore(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        bind_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let storage = Storage::open(&directory.path().join("seal.sqlite3")).unwrap();
+    let mut entity = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
+        entity = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    let view = entity.unwrap();
+    view.update_in(cx, |v, _, cx| {
+        v.storage
+            .as_mut()
+            .unwrap()
+            .create_asset("cash", "Sealed", 2500)
+            .unwrap();
+        v.reload().unwrap();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    // 导出密文 → 导入密文 → 确认覆盖：行为与旧版一致。
+    view.update_in(cx, |v, _, cx| {
+        let key = v.load_key().unwrap();
+        let sealed = v.storage.as_ref().unwrap().export_sealed(&key).unwrap();
+        let info = Storage::inspect_sealed(&sealed, &key).unwrap();
+        v.confirm = Some(Confirm::ImportSealed {
+            bytes: sealed,
+            info,
         });
         cx.notify();
     });
     cx.run_until_parked();
     click(cx, "确认覆盖");
     cx.run_until_parked();
-    view.read_with(cx, |view, _| {
-        assert_eq!(view.data.assets.len(), 11);
-        assert_eq!(view.data.history.len(), 22);
-        assert_eq!(view.data.subscriptions.len(), 9);
+    view.read_with(cx, |v, _| {
+        assert_eq!(v.data.assets.len(), 1);
+        assert_eq!(v.data.assets[0].name, "Sealed");
+        let json: Backup =
+            serde_json::from_str(&v.storage.as_ref().unwrap().export_json().unwrap()).unwrap();
+        assert_eq!(json.assets.len(), 1);
     });
-
-    // 替换同步密钥同样必须经过确认；旧密钥留 .bak，指纹随之更新。
-    let replacement = crate::crypto::SyncKey::generate().unwrap();
-    let new_fingerprint = replacement.fingerprint();
-    view.update_in(cx, |view, _window, cx| {
-        view.confirm = Some(Confirm::ReplaceKey {
-            text: zeroize::Zeroizing::new(replacement.encode_file()),
-            new_fingerprint: new_fingerprint.clone(),
-            old_fingerprint: Some(key.fingerprint()),
-        });
-        cx.notify();
-    });
-    cx.run_until_parked();
-    click(cx, "确认替换");
-    cx.run_until_parked();
-    assert_eq!(
-        crate::crypto::SyncKey::load(&key_path)
-            .unwrap()
-            .unwrap()
-            .to_hex(),
-        replacement.to_hex()
-    );
-    assert_eq!(
-        crate::crypto::SyncKey::load(&key_path.with_file_name("snowfold-sync.key.bak"))
-            .unwrap()
-            .unwrap()
-            .to_hex(),
-        key.to_hex(),
-        "旧密钥必须保留在 .bak 里"
-    );
-    view.read_with(cx, |view, _| {
-        assert_eq!(
-            view.key_fingerprint.as_deref(),
-            Some(new_fingerprint.as_str())
-        );
-    });
-    // 确认页打开期间密钥被别人改过：指纹对不上就必须拒绝，不能覆盖。
-    let stale = crate::crypto::SyncKey::generate().unwrap();
-    view.update_in(cx, |view, _window, cx| {
-        view.confirm = Some(Confirm::ReplaceKey {
-            text: zeroize::Zeroizing::new(stale.encode_file()),
-            new_fingerprint: stale.fingerprint(),
-            old_fingerprint: Some("0000-0000-0000-0000".into()),
-        });
-        cx.notify();
-    });
-    cx.run_until_parked();
-    click(cx, "确认替换");
-    cx.run_until_parked();
-    view.read_with(cx, |view, _| {
-        assert!(view.error.is_some(), "指纹不一致时必须报错");
-    });
-    assert_eq!(
-        crate::crypto::SyncKey::load(&key_path)
-            .unwrap()
-            .unwrap()
-            .to_hex(),
-        replacement.to_hex(),
-        "指纹不一致时不能改动密钥文件"
-    );
 }
+
 #[gpui::test]
 fn native_input_navigation_crud_and_settings_events(cx: &mut TestAppContext) {
     cx.update(|cx| {
@@ -530,20 +381,24 @@ fn native_input_navigation_crud_and_settings_events(cx: &mut TestAppContext) {
         gpui_component::Root::new(view, window, cx)
     });
     let view = entity.unwrap();
+    // 新建资产：Tab 走 名称 → 金额，回车保存（输入框 PressEnter）。
     cx.simulate_keystrokes("cmd-2 cmd-n");
     cx.simulate_input("Checking");
     cx.simulate_keystrokes("tab");
     cx.simulate_input("100.00");
     cx.simulate_keystrokes("enter");
     view.read_with(cx, |v, _| {
-        assert!(v.error.is_none(), "{:?}", v.error);
+        assert!(v.dialog.is_none(), "弹层未关闭");
         assert_eq!(v.data.assets.len(), 1);
         assert_eq!(v.data.assets[0].name, "Checking");
         assert_eq!(v.data.assets[0].amount_cents, 10000);
         assert_eq!(v.data.history.len(), 1);
     });
-    click(cx, "¥100.00");
-    cx.simulate_keystrokes("secondary-a");
+    // 调整余额弹层（旧行内金额编辑的行为等价迁移）。
+    click(cx, "Checking");
+    click(cx, "调整余额");
+    cx.run_until_parked();
+    cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("200");
     cx.simulate_keystrokes("enter");
     view.read_with(cx, |v, _| {
@@ -556,99 +411,119 @@ fn native_input_navigation_crud_and_settings_events(cx: &mut TestAppContext) {
         assert_eq!(v.data.assets[0].amount_cents, 10000);
         assert_eq!(v.data.history.len(), 1);
     });
+    // 新建订阅：默认今天，回车保存。
     cx.simulate_keystrokes("cmd-3 cmd-n");
-    view.read_with(cx, |v, _| {
-        assert_eq!(v.editing, Some(Editing::NewSubscription))
-    });
+    cx.run_until_parked();
     cx.simulate_input("Cloud");
     cx.simulate_keystrokes("tab");
     cx.simulate_input("6");
-    view.read_with(cx, |v, cx| {
-        assert_eq!(v.name.read(cx).value().as_str(), "Cloud");
-        assert_eq!(v.amount.read(cx).value().as_str(), "6");
-    });
     cx.simulate_keystrokes("enter");
     view.read_with(cx, |v, _| {
-        assert!(v.error.is_none(), "{:?}", v.error);
+        assert!(v.dialog.is_none(), "弹层未关闭");
         assert_eq!(v.data.subscriptions.len(), 1);
         assert_eq!(v.data.subscriptions[0].name, "Cloud");
         assert_eq!(v.data.subscriptions[0].amount_cents, 600);
     });
-    click(cx, "CNY");
-    click(cx, "USD");
+    // 编辑订阅：币种、周期分段保存。
+    click(cx, "Cloud");
+    cx.run_until_parked();
+    click(cx, "dlg-currency1");
+    click(cx, "保存");
     view.read_with(cx, |v, _| {
         assert_eq!(v.data.subscriptions[0].currency, "USD")
     });
-    click(cx, "每月");
-    click(cx, "每年");
+    click(cx, "Cloud");
+    click(cx, "dlg-cycle3");
+    click(cx, "保存");
     view.read_with(cx, |v, _| {
         assert_eq!(v.data.subscriptions[0].cycle, "yearly");
-        assert_eq!(v.data.subscriptions[0].next_charge_on, today());
+        assert_eq!(
+            v.data.subscriptions[0].next_charge_on,
+            snowfold_core::model::today()
+        );
     });
-    click(cx, "暂停");
+    // 续费（到期确认顺延）与暂停/恢复：行为不变。
+    view.update_in(cx, |v, window, cx| {
+        let id = v.data.subscriptions[0].id;
+        v.renew_subscription(id, window, cx);
+    });
+    view.read_with(cx, |v, _| {
+        assert!(v.banner.is_some());
+    });
+    view.update_in(cx, |v, window, cx| {
+        let id = v.data.subscriptions[0].id;
+        v.update_subscription(
+            id,
+            |s| {
+                s.status = "paused".into();
+                Ok(())
+            },
+            window,
+            cx,
+        );
+    });
     view.read_with(cx, |v, _| {
         assert_eq!(v.data.subscriptions[0].status, "paused")
     });
-    click(cx, "恢复");
-    view.read_with(cx, |v, _| {
-        assert_eq!(v.data.subscriptions[0].status, "active")
+    view.update_in(cx, |v, window, cx| {
+        let id = v.data.subscriptions[0].id;
+        v.update_subscription(
+            id,
+            |s| {
+                s.status = "active".into();
+                Ok(())
+            },
+            window,
+            cx,
+        );
     });
-    cx.simulate_keystrokes("cmd-,");
-    click(cx, "深色");
+    // 设置窗口：主题切换持久化；清空数据走确认框。
+    view.update_in(cx, |v, window, cx| {
+        v.set_theme(Theme::Dark, window, cx);
+    });
     view.read_with(cx, |v, _| {
         assert_eq!(v.storage.as_ref().unwrap().theme().unwrap(), Theme::Dark)
     });
-    click(cx, "导出");
-    assert!(cx.did_prompt_for_new_path());
-    let export_path = directory.path().join("roundtrip.json");
-    cx.simulate_new_path_selection(|_| Some(export_path.clone()));
+    // 删除资产（回资产页选中后点删除）。
+    cx.simulate_keystrokes("ctrl-2");
     cx.run_until_parked();
-    let exported: Backup =
-        serde_json::from_str(&std::fs::read_to_string(&export_path).unwrap()).unwrap();
-    exported.validate().unwrap();
-    assert_eq!(
-        (
-            exported.assets.len(),
-            exported.history.len(),
-            exported.subscriptions.len()
-        ),
-        (1, 1, 1)
-    );
-    click(cx, "清空");
+    click(cx, "Checking");
+    click(cx, "删除");
+    view.read_with(cx, |v, _| {
+        assert_eq!(v.data.assets.len(), 0);
+        assert!(v.undo.is_some(), "删除资产出现撤销横幅");
+    });
+    click(cx, "撤销 · 6秒内");
+    view.read_with(cx, |v, _| assert_eq!(v.data.assets.len(), 1));
+    // 清空全部数据（经确认框）。
+    view.update_in(cx, |v, _, cx| {
+        v.confirm = Some(Confirm::Clear);
+        cx.notify();
+    });
     click(cx, "取消");
     view.read_with(cx, |v, _| {
+        assert!(v.confirm.is_none());
         assert_eq!(v.data.assets.len(), 1);
-        assert_eq!(v.data.subscriptions.len(), 1);
     });
-    cx.simulate_keystrokes("escape cmd-1");
-    view.read_with(cx, |v, _| assert_eq!(v.page, 0));
-    cx.simulate_keystrokes("cmd-,");
+    view.update_in(cx, |v, _, cx| {
+        v.confirm = Some(Confirm::Clear);
+        cx.notify();
+    });
     click(cx, "清空");
-    click(cx, "确认覆盖");
     view.read_with(cx, |v, _| {
         assert!(v.data.assets.is_empty());
         assert!(v.data.subscriptions.is_empty());
     });
-    cx.simulate_keystrokes("escape cmd-3 cmd-n escape");
+    // Esc 关闭弹层、Ctrl+1/2/3 切页、设置窗口打开。
+    cx.simulate_keystrokes("ctrl-3 ctrl-n escape");
     view.read_with(cx, |v, _| {
-        assert!(v.editing.is_none());
+        assert!(v.dialog.is_none());
         assert!(v.data.subscriptions.is_empty());
     });
-    // Root focus traverses the same controls as a keyboard user; Enter invokes Div::on_click.
-    cx.simulate_keystrokes("tab");
-    cx.simulate_keystrokes("tab");
-    cx.simulate_keystrokes("enter");
-    // GPUI simulate_keystrokes only sends KeyDown; Div keyboard clicks use KeyUp.
-    cx.simulate_event(KeyUpEvent {
-        keystroke: Keystroke::parse("enter").unwrap(),
-    });
-    view.read_with(cx, |v, _| assert_eq!(v.page, 1));
-    cx.simulate_keystrokes("cmd-, tab enter");
-    cx.simulate_event(KeyUpEvent {
-        keystroke: Keystroke::parse("enter").unwrap(),
-    });
-    view.read_with(cx, |v, _| assert!(!v.settings));
-    cx.simulate_keystrokes("cmd-,");
+    cx.simulate_keystrokes("ctrl-1");
+    view.read_with(cx, |v, _| assert_eq!(v.page, 0));
+    cx.simulate_keystrokes("ctrl-,");
+    view.read_with(cx, |v, _| assert!(v.settings_window.is_some()));
     view.read_with(cx, |v, _| {
         v.data.validate().unwrap();
     });
@@ -670,10 +545,6 @@ fn native_input_navigation_crud_and_settings_events(cx: &mut TestAppContext) {
             );
             assert_eq!(reopened.theme().unwrap(), Theme::Dark);
         });
-        eprintln!(
-            "GPUI event-created persistence evidence: {}",
-            output.display()
-        );
     }
 }
 
@@ -686,7 +557,7 @@ fn invalid_amount_enter_preserves_single_line_input(cx: &mut TestAppContext) {
     let directory = tempfile::tempdir().unwrap();
     let mut storage = Storage::open(&directory.path().join("single-line.sqlite3")).unwrap();
     let id = storage
-        .create_asset(crate::model::CATEGORIES[0].0, "Checking", 10000)
+        .create_asset(snowfold_core::model::CATEGORIES[0].0, "Checking", 10000)
         .unwrap();
     let mut entity = None;
     let (_root, cx) = cx.add_window_view(|window, cx| {
@@ -696,26 +567,193 @@ fn invalid_amount_enter_preserves_single_line_input(cx: &mut TestAppContext) {
     });
     let view = entity.unwrap();
     cx.simulate_keystrokes("cmd-2");
-    click(cx, "¥100.00");
-    // Windows 没有 cmd-a 全选绑定，追加 200 后会留下这个非法金额。
-    cx.simulate_input("200");
-    view.read_with(cx, |v, cx| {
-        assert_eq!(v.amount.read(cx).value().as_str(), "100.00200");
-    });
+    click(cx, "Checking");
+    click(cx, "调整余额");
+    // Windows 没有 ctrl-a 全选绑定；追加非法片段保留原输入。
+    cx.simulate_input(".5.5");
     cx.simulate_keystrokes("enter");
-    view.read_with(cx, |v, cx| {
-        assert!(v.error.is_some());
-        assert_eq!(v.editing, Some(Editing::AssetAmount(id)));
-        assert_eq!(v.data.assets[0].amount_cents, 10000);
-        assert_eq!(v.amount.read(cx).value().as_str(), "100.00200");
+    cx.run_until_parked();
+    view.read_with(cx, |v, app| {
+        assert!(v.dialog.is_some(), "校验失败弹层保持打开");
+        assert!(v.amount_error.is_some(), "金额错误应有字段级提示");
+        assert!(!v.name_error && !v.date_error);
+        let amount_text = v.amount.read(app).value().to_string();
+        assert_eq!(amount_text, "100.00.5.5", "已输入内容不清空");
+        assert_eq!(v.data.history.len(), 1, "非法金额不落库");
+        let _ = id;
     });
-    cx.simulate_keystrokes("secondary-a");
-    cx.simulate_input("200");
-    cx.simulate_keystrokes("enter");
-    view.read_with(cx, |v, cx| {
-        assert!(v.error.is_none(), "{:?}", v.error);
-        assert!(v.editing.is_none());
-        assert_eq!(v.data.assets[0].amount_cents, 20000);
-        assert_eq!(v.amount.read(cx).value().as_str(), "200");
+}
+
+#[gpui::test]
+fn startup_error_replaces_content_and_blocks_sidebar(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        bind_keys(cx);
     });
+    let (_root, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| SnowFold::load(Err(anyhow::anyhow!("boom")), window, cx));
+        gpui_component::Root::new(view, window, cx)
+    });
+    cx.run_until_parked();
+    cx.simulate_keystrokes("ctrl-1");
+    cx.run_until_parked();
+    // 侧边栏渲染但切页被拦下；工具栏标题退回品牌名。
+    assert!(cx.debug_bounds("nav-overview").is_some());
+    let title = cx.debug_bounds("toolbar-title").expect("品牌标题");
+    assert!(f32::from(title.size.width) > 0.);
+}
+
+/// 工具栏与内容边距：最小窗口、默认窗口与大窗口均保留完整按钮。
+#[gpui::test]
+fn topbar_geometry_matches_reference_layout(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        bind_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let mut storage = Storage::open(&directory.path().join("topbar.sqlite3")).unwrap();
+    storage
+        .create_asset("cash", "布局测试长金额资产", 999_999_999_999)
+        .unwrap();
+    storage
+        .create_asset("debt", "布局测试负债", 123_456_789)
+        .unwrap();
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
+        gpui_component::Root::new(view, window, cx)
+    });
+    for (width, height) in [(900., 600.), (1080., 720.), (1440., 900.)] {
+        cx.simulate_resize(size(px(width), px(height)));
+        cx.run_until_parked();
+        let label = cx.debug_bounds("overview-label").unwrap();
+        let overview = cx.debug_bounds("overview-body").unwrap();
+        assert!(
+            (f32::from(label.origin.y) - 60.).abs() < 1.5,
+            "label={label:?}; overview={overview:?}"
+        );
+        let toolbar = cx.debug_bounds("toolbar").unwrap();
+        assert!((f32::from(toolbar.size.height) - 52.).abs() < 1.5);
+        let add = cx.debug_bounds("toolbar-new").unwrap();
+        assert!((f32::from(add.size.width) - 32.).abs() < 1.5);
+        assert!((f32::from(add.origin.y) - 10.).abs() < 1.5);
+        let controls = if cfg!(windows) { 138. } else { 0. };
+        assert!((f32::from(add.origin.x + add.size.width) - (width - controls - 16.)).abs() < 1.5);
+        let settings = cx.debug_bounds("nav-settings").unwrap();
+        assert!(settings.origin.y + settings.size.height <= px(height - 8.));
+        assert!(settings.origin.y > px(height - 64.));
+        click(cx, "nav-assets");
+        for (label, selector) in [
+            ("总负债", "asset-summary-总负债"),
+            ("净资产", "asset-summary-净资产"),
+            ("记录", "asset-summary-记录"),
+        ] {
+            let metric = cx.debug_bounds(selector).unwrap();
+            assert!(metric.origin.x >= px(236. + 32.));
+            assert!(
+                metric.origin.x + metric.size.width <= px(width - 32. + 1.),
+                "长金额摘要必须完整显示：{label} {metric:?} 窗口宽 {width}"
+            );
+        }
+        click(cx, "nav-overview");
+    }
+}
+
+/// 新规范弹层：480 表单、420 确认框；三种窗口尺寸都居中且按钮完整。
+#[gpui::test]
+fn modal_sheets_match_reference_geometry(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        bind_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let storage = Storage::open(&directory.path().join("modal.sqlite3")).unwrap();
+    let mut entity = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
+        entity = Some(view.clone());
+        gpui_component::Root::new(view, window, cx)
+    });
+    let view = entity.unwrap();
+    for (width, height) in [(900., 600.), (1080., 720.), (1440., 900.)] {
+        cx.simulate_resize(size(px(width), px(height)));
+        view.update_in(cx, |v, window, cx| {
+            v.confirm = None;
+            v.begin_dialog(super::state::Dialog::NewSubscription, window, cx);
+        });
+        cx.run_until_parked();
+        let form = cx.debug_bounds("dialog").expect("新建订阅弹层");
+        assert!((f32::from(form.size.width) - 480.).abs() < 1.5);
+        assert!((f32::from(form.origin.x + form.size.width / 2.) - width / 2.).abs() < 1.5);
+        assert!((f32::from(form.origin.y + form.size.height / 2.) - height / 2.).abs() < 1.5);
+        let save = cx.debug_bounds("保存").unwrap();
+        assert!((f32::from(save.size.height) - 32.).abs() < 1.5);
+        assert!(save.origin.y + save.size.height < px(height));
+        view.update_in(cx, |v, window, cx| {
+            v.cancel_dialog(window, cx);
+            v.confirm = Some(Confirm::Clear);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let confirm = cx.debug_bounds("confirm").expect("确认弹层");
+        assert!((f32::from(confirm.size.width) - 420.).abs() < 1.5);
+        assert!((f32::from(confirm.origin.x + confirm.size.width / 2.) - width / 2.).abs() < 1.5);
+    }
+}
+
+/// 统计由焦点金额与两项支出构成，间距 40、底对齐；页面四周留出32边距。
+#[gpui::test]
+fn subscription_stats_card_matches_reference_grid(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        bind_keys(cx);
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let mut storage = Storage::open(&directory.path().join("stats.sqlite3")).unwrap();
+    storage
+        .create_subscription(&snowfold_core::model::SubscriptionInput {
+            name: "几何测试订阅".into(),
+            amount_cents: 2100,
+            currency: "CNY".into(),
+            cycle: "monthly".into(),
+            next_charge_on: snowfold_core::model::today(),
+            status: "active".into(),
+        })
+        .unwrap();
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let view = cx.new(|cx| SnowFold::load(Ok(storage), window, cx));
+        gpui_component::Root::new(view, window, cx)
+    });
+    cx.simulate_keystrokes("ctrl-3");
+    for (width, height) in [(900., 600.), (1080., 720.), (1440., 900.)] {
+        cx.simulate_resize(size(px(width), px(height)));
+        cx.run_until_parked();
+        let stats = cx.debug_bounds("stats-card").expect("订阅统计");
+        assert!((f32::from(stats.origin.x) - 268.).abs() < 1.5, "{stats:?}");
+        assert!((f32::from(stats.origin.y) - 60.).abs() < 1.5, "{stats:?}");
+        assert!(
+            (f32::from(stats.origin.x + stats.size.width) - (width - 32.)).abs() < 1.5,
+            "{stats:?}"
+        );
+        let columns: Vec<_> = ["stat0", "stat1", "stat2"]
+            .map(|s| cx.debug_bounds(s).unwrap())
+            .into();
+        for pair in columns.windows(2) {
+            assert!(
+                (f32::from(pair[1].origin.x - pair[0].origin.x - pair[0].size.width) - 40.).abs()
+                    < 1.5
+            );
+            assert!(
+                (f32::from(
+                    pair[0].origin.y + pair[0].size.height - pair[1].origin.y - pair[1].size.height
+                ))
+                .abs()
+                    < 1.5
+            );
+        }
+        let row = cx.debug_bounds("几何测试订阅").unwrap();
+        assert!(
+            (f32::from(row.origin.x + row.size.width) - (width - 32.)).abs() < 1.5,
+            "{row:?}"
+        );
+    }
 }

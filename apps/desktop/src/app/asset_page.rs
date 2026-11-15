@@ -1,410 +1,611 @@
-use super::{
-    components::Palette,
-    state::{Editing, SnowFold},
-};
-use crate::model::{self, CATEGORIES, money};
+//! 资产（§9.3，两栏）：左栏五个分类，右栏未选中时总资产概览、选中时条目详情。
+
+use gpui::SharedString;
 use gpui::{prelude::*, *};
-use gpui_component::{Icon, IconName};
+
+use super::{
+    overview::{category_sums, pct_text},
+    state::{Dialog, SnowFold},
+    widgets::{
+        AmountLevel, M, SB, btn_primary, btn_secondary, btn_text, card, focus_amount, icon_block,
+        sizes, t,
+    },
+};
+use crate::theme::Palette;
+use snowfold_core::model::{self, CATEGORIES, money};
+
+/// RFC3339 → 「2026年11月14日 18:49」（解析失败原样返回）。
+pub(super) fn cn_time(stamp: &str) -> String {
+    use chrono::{Datelike, Timelike};
+    match chrono::NaiveDateTime::parse_from_str(
+        stamp.get(..19).unwrap_or(stamp),
+        "%Y-%m-%dT%H:%M:%S",
+    ) {
+        Ok(t) => format!(
+            "{}年{}月{}日 {:02}:{:02}",
+            t.year(),
+            t.month(),
+            t.day(),
+            t.hour(),
+            t.minute()
+        ),
+        Err(_) => stamp.to_string(),
+    }
+}
 
 impl SnowFold {
+    pub(super) fn render_assets(&self, p: &Palette, cx: &mut gpui::Context<Self>) -> Div {
+        if self.data.assets.is_empty() {
+            return super::widgets::empty_state(
+                "icons/line/wallet.svg",
+                "还没有资产",
+                "现金、房产、投资、借出和欠款都可以记",
+                btn_primary("empty-add-asset", "添加资产", p).on_click(cx.listener(
+                    |this, _, window, cx| this.begin_dialog(Dialog::AddAsset, window, cx),
+                )),
+                p,
+            );
+        }
+        let (sums, counts, overflow, total, debt) = category_sums(&self.data);
+        let _ = counts;
+        let shown = |v: Option<i64>| {
+            v.map(|v| money(v, "CNY"))
+                .unwrap_or_else(|| "超出范围".into())
+        };
+        let left_width = self.last_content_width + 300. >= 1400.;
+        let left = if left_width {
+            440.
+        } else {
+            380_f32.min(self.last_content_width * 0.49)
+        };
+        let mut body = div().flex().gap(px(24.)).items_start().child(
+            div()
+                .w(px(left))
+                .flex_none()
+                .flex()
+                .flex_col()
+                .gap(px(24.))
+                .child(self.asset_sections(p, &sums, overflow, cx)),
+        );
+        body = body.child(div().flex_1().min_w(px(0.)).flex().flex_col().child(
+            match self.selected {
+                Some(id) => self.asset_detail(p, id, cx),
+                None => self.assets_summary(p, total, debt, overflow, &shown),
+            },
+        ));
+        body
+    }
+
+    /// 左栏五个分区（间距 24）：分区头 + 卡片行；空分类用紧凑空态行。
+    fn asset_sections(
+        &self,
+        p: &Palette,
+        sums: &[i64; 5],
+        overflow: bool,
+        cx: &mut gpui::Context<Self>,
+    ) -> Div {
+        let mut sections = div().flex().flex_col().gap(px(24.));
+        for (index, (code, label)) in model::CATEGORIES.iter().enumerate() {
+            let assets: Vec<&model::Asset> = self
+                .data
+                .assets
+                .iter()
+                .filter(|a| a.category_code == *code)
+                .collect();
+            let sum = assets
+                .iter()
+                .try_fold(0i64, |v, a| v.checked_add(a.amount_cents));
+            let header = div()
+                .flex()
+                .items_center()
+                .gap(px(12.))
+                .px(px(4.))
+                .pb(px(8.))
+                .pt(px(4.))
+                .child(icon_block(index, p, false))
+                .child(
+                    div()
+                        .text_size(px(sizes::SECTION))
+                        .line_height(px(sizes::SECTION_LH))
+                        .child(t(*label, p.text, SB)),
+                )
+                .child(t(
+                    format!("{} 项", assets.len()),
+                    p.text2,
+                    FontWeight::NORMAL,
+                ))
+                .child(div().flex_1())
+                .child(
+                    div().text_size(px(sizes::BODY)).child(super::widgets::n(
+                        sum.map(|v| money(if index == 4 { -v } else { v }, "CNY"))
+                            .unwrap_or_else(|| "合计超出范围".into()),
+                        if index == 4 { p.neg } else { p.text },
+                        M,
+                    )),
+                );
+            let mut list = card().bg(p.card);
+            if assets.is_empty() {
+                list = list.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(12.))
+                        .px(px(16.))
+                        .py(px(12.))
+                        .child(icon_block(index, p, false))
+                        .child(div().flex_1().text_size(px(sizes::BODY)).child(t(
+                            format!("暂无{}", CATEGORIES[index].1),
+                            p.text2,
+                            FontWeight::NORMAL,
+                        )))
+                        .child(
+                            super::widgets::btn_soft(("add-empty", index), "＋ 添加", p).on_click(
+                                cx.listener(move |this, _, window, cx| {
+                                    this.new_category = index;
+                                    this.begin_dialog(Dialog::AddAsset, window, cx);
+                                }),
+                            ),
+                        ),
+                );
+            }
+            for (row_index, a) in assets.iter().enumerate() {
+                if row_index > 0 {
+                    list = list
+                        .child(super::widgets::row_separator(16., p))
+                        .child(div().h(px(0.)).w_full());
+                }
+                list = list.child(self.asset_row(p, a, cx));
+            }
+            let section = div()
+                .flex()
+                .flex_col()
+                .child(header)
+                .when(overflow, |s| {
+                    s.child(div().text_size(px(sizes::AUX)).child(t(
+                        "金额合计超出整数范围，请检查资产数据",
+                        p.neg,
+                        FontWeight::NORMAL,
+                    )))
+                })
+                .child(list);
+            sections = sections.child(section);
+            let _ = sums;
+        }
+        sections
+    }
+
     fn asset_row(
         &self,
-        p: Palette,
+        p: &Palette,
         a: &model::Asset,
         cx: &mut gpui::Context<Self>,
     ) -> Stateful<Div> {
-        let id = a.id;
-        let open = self.history == Some(id);
-        let history_count = self
-            .data
-            .history
-            .iter()
-            .filter(|h| h.asset_id == id)
-            .count();
-        let mut row = div()
+        let asset_id = a.id;
+        let selected = self.selected == Some(a.id);
+        let highlight = self.highlight == Some(a.id);
+        div()
+            .debug_selector({
+                let name = a.name.clone();
+                move || name.to_string()
+            })
+            .id((ElementId::from("asset-row"), a.id.to_string()))
+            .tab_index(0)
+            .tab_stop(true)
+            .when(highlight, |row| {
+                row.anchor_scroll(Some(self.new_item.clone()))
+            })
             .flex()
             .items_center()
-            .gap_3()
-            .h(px(50.))
-            .px_4()
-            .border_t_1()
-            .border_color(p.line)
-            .id((ElementId::from("asset-row"), id.to_string()))
-            .anchor_scroll((self.highlight == Some(id)).then(|| self.new_item.clone()))
-            .bg(if open {
-                p.subtle
-            } else if self.highlight == Some(id) {
-                p.hover
-            } else {
-                p.card
-            })
-            .hover(move |s| s.bg(p.hover));
-        row = row.child(
-            div()
-                .flex_1()
-                .min_w(px(0.))
-                .overflow_hidden()
-                .text_ellipsis()
-                .child(if self.editing == Some(Editing::AssetName(id)) {
-                    self.inline_input(false).into_any_element()
-                } else {
-                    p.text_control((ElementId::from("asset-name"), id.to_string()))
-                        .debug_selector({
-                            let name = a.name.clone();
-                            move || name.to_string()
-                        })
-                        .px(px(4.))
-                        .py(px(3.))
-                        .text_size(px(13.5))
-                        .child(a.name.clone())
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.begin(Editing::AssetName(id), window, cx)
-                        }))
-                        .into_any_element()
-                }),
-        );
-        row = row.child(
-            p.text_control((ElementId::from("asset-history"), id.to_string()))
-                .flex()
-                .items_center()
-                .gap_1()
-                .h(px(22.))
-                .px(px(7.))
-                .text_size(px(11.))
-                .text_color(if open { p.text } else { p.ink3 })
-                .when(open, |chip| chip.bg(p.subtle))
-                .child(
-                    svg()
-                        .path("icons/clock.svg")
-                        .w(px(12.))
-                        .h(px(12.))
-                        .text_color(if open { p.text } else { p.ink3 }),
-                )
-                .child(history_count.to_string())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.history = if this.history == Some(id) {
-                        None
-                    } else {
-                        Some(id)
-                    };
-                    cx.notify();
-                })),
-        );
-        row = row.child(div().flex_1().min_w(px(0.)));
-        row = row.child(if self.editing == Some(Editing::AssetAmount(id)) {
-            self.inline_input(true)
-        } else {
-            div().child(
-                p.text_control((ElementId::from("asset-amount"), id.to_string()))
-                    .debug_selector({
-                        let label = money(a.amount_cents, "CNY");
-                        move || label.clone()
-                    })
-                    .px(px(4.))
-                    .py(px(3.))
-                    .text_size(px(13.5))
-                    .text_color(p.text)
-                    .child(money(a.amount_cents, "CNY"))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.begin(Editing::AssetAmount(id), window, cx)
-                    })),
+            .gap(px(12.))
+            .min_h(px(44.))
+            .px(px(16.))
+            .py(px(10.))
+            .cursor_pointer()
+            .when(selected, |s| s.bg(p.brand_soft))
+            .when(!selected && highlight, |s| s.bg(p.hover()))
+            .hover(move |s| if selected { s } else { s.bg(p.hover()) })
+            .focus(move |s| s.border_3().border_color(crate::theme::fade(p.brand, 0.4)))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.selected = Some(asset_id);
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .text_size(px(sizes::BODY))
+                    .line_height(px(sizes::BODY_LH))
+                    .child(t(
+                        a.name.clone(),
+                        if selected { p.brand } else { p.text },
+                        if selected { M } else { FontWeight::NORMAL },
+                    )),
             )
-        });
-        row = row.child(
-            p.text_control((ElementId::from("delete-asset"), id.to_string()))
-                .debug_selector(|| "×".to_string())
-                .flex()
-                .items_center()
-                .justify_center()
-                .w(px(24.))
-                .h(px(24.))
-                .text_color(p.ink3)
-                .hover(move |s| s.text_color(p.neg))
-                .child(Icon::new(IconName::Close).size_3p5())
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    cx.stop_propagation();
-                    this.delete_asset(id, window, cx)
-                })),
-        );
-        row
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(px(sizes::BODY))
+                    .child(super::widgets::n(
+                        money(
+                            if a.category_code == "debt" {
+                                -a.amount_cents
+                            } else {
+                                a.amount_cents
+                            },
+                            "CNY",
+                        ),
+                        if selected { p.brand } else { p.text },
+                        M,
+                    )),
+            )
     }
 
-    fn asset_history_panel(
+    /// 右栏未选中：总资产概览（页标题焦点）。
+    fn assets_summary(
         &self,
-        p: Palette,
-        a: &model::Asset,
-        cx: &mut gpui::Context<Self>,
+        p: &Palette,
+        total: Option<i64>,
+        debt: i64,
+        overflow: bool,
+        shown: &dyn Fn(Option<i64>) -> String,
     ) -> Div {
-        let id = a.id;
-        let history = self
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap(px(16.))
+            .child(t("总资产", p.text2, M))
+            .child(focus_amount(&shown(total), AmountLevel::Page, false, p))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_x(px(32.))
+                    .gap_y(px(16.))
+                    .child(summary_metric("总负债", money(-debt, "CNY"), p.neg, p))
+                    .child(summary_metric(
+                        "净资产",
+                        &total
+                            .map(|v| v - debt)
+                            .map(|v| money(v, "CNY"))
+                            .unwrap_or_else(|| "超出范围".into()),
+                        p.text,
+                        p,
+                    ))
+                    .child(summary_metric(
+                        "记录",
+                        format!("{} 项", self.data.assets.len()),
+                        p.text,
+                        p,
+                    )),
+            );
+        if overflow {
+            body = body.child(div().text_size(px(sizes::AUX)).child(t(
+                "金额合计超出整数范围，请检查资产数据",
+                p.neg,
+                FontWeight::NORMAL,
+            )));
+        }
+        // 四个资产分类的构成卡（负债不计入）。
+        let mut card = card().bg(p.card).mt(px(8.));
+        for i in 0..4 {
+            if i > 0 {
+                card = card
+                    .child(super::widgets::row_separator(60., p))
+                    .child(div().h(px(0.)).w_full());
+            }
+            let ratio = total
+                .filter(|v| *v > 0)
+                .map(|v| self.sums_cached[i] as f64 / v as f64 * 100.)
+                .unwrap_or(0.);
+            let (bg, glyph) = p.cat(i);
+            card = card.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .px(px(16.))
+                    .py(px(12.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(12.))
+                            .child(icon_block(i, p, false))
+                            .child(t(model::CATEGORIES[i].1, p.text, M))
+                            .child(div().flex_1())
+                            .child(div().text_size(px(sizes::BODY)).child(super::widgets::n(
+                                money(self.sums_cached[i], "CNY"),
+                                p.text,
+                                M,
+                            ))),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(12.))
+                            .pl(px(40.))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .h(px(4.))
+                                    .rounded_full()
+                                    .bg(p.bg)
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .h_full()
+                                            .rounded_full()
+                                            .w(relative(if ratio > 0. {
+                                                (ratio / 100.).clamp(0.005, 1.) as f32
+                                            } else {
+                                                0.
+                                            }))
+                                            .bg(glyph),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .w(px(44.))
+                                    .flex_none()
+                                    .text_right()
+                                    .text_size(px(sizes::AUX))
+                                    .child(t(pct_text(ratio), p.text2, FontWeight::NORMAL)),
+                            ),
+                    )
+                    .when(i == 3, |row| {
+                        let _ = bg;
+                        row
+                    }),
+            );
+        }
+        body.child(card)
+    }
+
+    /// 右栏选中条目：详情 + 变动记录。
+    fn asset_detail(&self, p: &Palette, id: model::Id, cx: &mut gpui::Context<Self>) -> Div {
+        let Some(a) = self.data.assets.iter().find(|a| a.id == id) else {
+            return div();
+        };
+        let category_index = model::CATEGORIES
+            .iter()
+            .position(|(code, _)| *code == a.category_code)
+            .unwrap_or(0);
+        let history: Vec<&model::History> = self
             .data
             .history
             .iter()
             .filter(|h| h.asset_id == id)
-            .collect::<Vec<_>>();
-        let mut panel = div()
+            .collect();
+        let updated = a.updated_at.clone();
+        let mut body = div()
             .flex()
             .flex_col()
-            .gap_2()
-            .px_4()
-            .pt_3()
-            .pb_4()
-            .border_t_1()
-            .border_color(p.line)
-            .bg(p.subtle)
+            .gap(px(4.))
             .child(
                 div()
-                    .text_size(px(11.5))
-                    .text_color(p.ink3)
-                    .child("变动记录 · 修正不会新增快照"),
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .size(px(24.))
+                            .rounded(px(8.))
+                            .bg(p.cat(category_index).0)
+                            .child(
+                                svg()
+                                    .path(super::widgets::category_icon(category_index, false))
+                                    .size(px(16.))
+                                    .text_color(p.cat(category_index).1),
+                            ),
+                    )
+                    .child(div().text_size(px(sizes::AUX)).child(t(
+                        model::CATEGORIES[category_index].1,
+                        p.text2,
+                        FontWeight::NORMAL,
+                    ))),
+            )
+            .child(
+                div()
+                    .mt(px(4.))
+                    .text_size(px(sizes::SECTION))
+                    .line_height(px(sizes::SECTION_LH))
+                    .child(t(a.name.clone(), p.text, SB)),
+            )
+            .child(
+                focus_amount(
+                    &money(
+                        if a.category_code == "debt" {
+                            -a.amount_cents
+                        } else {
+                            a.amount_cents
+                        },
+                        "CNY",
+                    ),
+                    AmountLevel::Page,
+                    a.category_code == "debt",
+                    p,
+                )
+                .mt(px(8.)),
+            )
+            .child(
+                div()
+                    .mt(px(8.))
+                    .text_size(px(sizes::AUX))
+                    .line_height(px(sizes::AUX_LH))
+                    .child(t(
+                        format!(
+                            "更新于 {} · 历史 {} 条",
+                            cn_time(&updated)
+                                .split(' ')
+                                .next()
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| updated.clone()),
+                            history.len()
+                        ),
+                        p.text2,
+                        FontWeight::NORMAL,
+                    )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .mt(px(16.))
+                    .child(
+                        btn_primary("adjust-balance", "调整余额", p).on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.begin_dialog(Dialog::AdjustBalance(id), window, cx)
+                            },
+                        )),
+                    )
+                    .child(
+                        btn_secondary("rename-asset", "重命名", p).on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.begin_dialog(Dialog::RenameAsset(id), window, cx)
+                            },
+                        )),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        btn_text("delete-asset", "删除", p.neg, p).on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.selected = None;
+                                this.delete_asset(id, window, cx);
+                            },
+                        )),
+                    ),
             );
+        body = body.child(
+            div()
+                .mt(px(24.))
+                .flex()
+                .items_baseline()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .text_size(px(sizes::SECTION))
+                        .line_height(px(sizes::SECTION_LH))
+                        .child(t("变动记录", p.text, SB)),
+                )
+                .child(div().text_size(px(sizes::AUX)).child(t(
+                    "修正不会新增快照",
+                    p.text2,
+                    FontWeight::NORMAL,
+                ))),
+        );
+        let mut card = card().bg(p.card).mt(px(12.));
+        if history.is_empty() {
+            card = card.child(
+                div()
+                    .px(px(16.))
+                    .py(px(16.))
+                    .text_size(px(sizes::BODY))
+                    .child(t("还没有变动记录", p.text2, FontWeight::NORMAL)),
+            );
+        }
         for (position, h) in history.iter().enumerate().rev() {
-            let hid = h.id;
+            if position + 1 < history.len() {
+                card = card
+                    .child(super::widgets::row_separator(16., p))
+                    .child(div().h(px(0.)).w_full());
+            }
             let delta = position
                 .checked_sub(1)
                 .map(|i| h.amount_cents - history[i].amount_cents);
-            let label = if position + 1 == history.len() {
-                "当前"
-            } else {
-                ""
-            };
-            let mut row = div()
-                .flex()
-                .items_center()
-                .gap_3()
-                .h(px(38.))
-                .child(
-                    div()
-                        .w(px(220.))
-                        .text_size(px(12.))
-                        .text_color(p.muted)
-                        .child(format!("{}  {}", h.recorded_at, label)),
-                )
-                .child(
-                    div().flex_1().text_size(px(12.)).text_color(p.ink3).child(
-                        delta
-                            .map(|v| format!("{}{}", if v > 0 { "+" } else { "" }, money(v, "CNY")))
-                            .unwrap_or_else(|| "初始".into()),
-                    ),
-                );
-            row = row.child(if self.editing == Some(Editing::History(hid)) {
-                self.inline_input(true)
-            } else {
-                div()
-                    .text_size(px(13.))
-                    .text_right()
-                    .child(money(h.amount_cents, "CNY"))
-            });
-            row = row.child(
-                p.button(
-                    (ElementId::from("correct-history"), hid.to_string()),
-                    if self.editing == Some(Editing::History(hid)) {
-                        "完成"
-                    } else {
-                        "修正"
-                    },
-                )
-                .text_size(px(12.))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    if this.editing == Some(Editing::History(hid)) {
-                        this.save_edit(window, cx);
-                    } else {
-                        this.begin(Editing::History(hid), window, cx);
-                    }
-                })),
-            );
-            panel = panel.child(row);
-        }
-        panel
-    }
-
-    fn asset_section(
-        &self,
-        p: Palette,
-        index: usize,
-        code: &str,
-        label: &'static str,
-        cx: &mut gpui::Context<Self>,
-    ) -> Div {
-        let assets = self
-            .data
-            .assets
-            .iter()
-            .filter(|a| a.category_code == code)
-            .collect::<Vec<_>>();
-        let sum = assets
-            .iter()
-            .try_fold(0i64, |v, a| v.checked_add(a.amount_cents));
-        let (chip_bg, chip_fg) = p.category_tint(index);
-        let header = div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px(px(2.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .flex_none()
-                    .w(px(27.))
-                    .h(px(27.))
-                    .rounded(px(8.))
-                    .bg(chip_bg)
-                    .child(
-                        svg()
-                            .path(Self::category_icon(index))
-                            .w(px(15.))
-                            .h(px(15.))
-                            .text_color(chip_fg),
-                    ),
-            )
-            .child(
-                div()
-                    .text_size(px(14.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(label),
-            )
-            .child(
-                div()
-                    .text_size(px(11.5))
-                    .text_color(p.ink3)
-                    .child(format!("{} 项", assets.len())),
-            )
-            .child(div().flex_1())
-            .child(
-                div()
-                    .text_size(px(15.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(if index == 4 { p.neg } else { p.text })
-                    .child(
-                        sum.map(|v| money(v, "CNY"))
-                            .unwrap_or_else(|| "合计超出范围".into()),
-                    ),
-            )
-            .child(
-                p.text_control(("add-asset", index))
-                    .debug_selector(|| "＋ 添加".to_string())
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .h(px(26.))
-                    .pl(px(7.))
-                    .pr(px(9.))
-                    .text_size(px(12.5))
-                    .text_color(p.ink3)
-                    .hover(move |s| s.bg(p.subtle).text_color(p.text))
-                    .child(Icon::new(IconName::Plus).size_3())
-                    .child("添加")
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.begin(Editing::NewAsset(index), window, cx)
-                    })),
-            );
-        let mut card = div()
-            .flex()
-            .flex_col()
-            .rounded(px(18.))
-            .border_1()
-            .border_color(p.line)
-            .bg(p.card)
-            .overflow_hidden()
-            .mt(px(11.));
-        if self.editing == Some(Editing::NewAsset(index)) {
+            let is_current = position + 1 == history.len();
+            let hid = h.id;
             card = card.child(
                 div()
                     .flex()
                     .items_center()
-                    .gap_2()
-                    .px_4()
-                    .py(px(10.))
-                    .bg(p.subtle)
-                    .border_b_1()
-                    .border_color(p.line)
-                    .child(self.inline_input(false))
-                    .child(self.inline_input(true))
-                    .child(self.edit_controls(p, cx)),
+                    .gap(px(12.))
+                    .px(px(16.))
+                    .py(px(12.))
+                    .min_h(px(56.))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.))
+                            .min_w(px(0.))
+                            .child(
+                                div()
+                                    .text_size(px(sizes::BODY))
+                                    .line_height(px(sizes::BODY_LH))
+                                    .child(t(cn_time(&h.recorded_at), p.text, FontWeight::NORMAL)),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.))
+                                    .children(if is_current {
+                                        Some(
+                                            super::widgets::badge("当前", p.brand_soft, p.brand)
+                                                .into_any_element(),
+                                        )
+                                    } else {
+                                        None
+                                    })
+                                    .child(
+                                        div().text_size(px(sizes::AUX)).child(t(
+                                            delta
+                                                .map(|v| {
+                                                    format!(
+                                                        "{}{}",
+                                                        if v > 0 { "+" } else { "" },
+                                                        money(v, "CNY")
+                                                    )
+                                                })
+                                                .unwrap_or_else(|| "初始".into()),
+                                            p.text2,
+                                            FontWeight::NORMAL,
+                                        )),
+                                    ),
+                            ),
+                    )
+                    .child(div().flex_1())
+                    .child(div().text_size(px(sizes::BODY)).child(super::widgets::n(
+                        money(h.amount_cents, "CNY"),
+                        p.text,
+                        FontWeight::NORMAL,
+                    )))
+                    .child(
+                        btn_text(
+                            (ElementId::from("correct-history"), hid.to_string()),
+                            "修正",
+                            p.brand,
+                            p,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.begin_dialog(Dialog::CorrectHistory(hid), window, cx)
+                            },
+                        )),
+                    ),
             );
         }
-        if assets.is_empty() && self.editing != Some(Editing::NewAsset(index)) {
-            card = card.child(
-                div()
-                    .py_5()
-                    .px_4()
-                    .text_center()
-                    .text_size(px(12.5))
-                    .text_color(p.ink3)
-                    .child("还没有记录，点击右侧「添加」记下第一笔"),
-            );
-        }
-        for a in assets {
-            card = card.child(self.asset_row(p, a, cx));
-            if self.history == Some(a.id) {
-                card = card.child(self.asset_history_panel(p, a, cx));
-            }
-        }
-        div().flex().flex_col().child(header).child(card)
+        body.child(card)
     }
+}
 
-    pub(super) fn render_assets(&self, p: Palette, cx: &mut gpui::Context<Self>) -> Div {
-        let mut sums = [0i64; 5];
-        let mut overflow = false;
-        for a in &self.data.assets {
-            if let Some(i) = CATEGORIES.iter().position(|(c, _)| *c == a.category_code) {
-                match sums[i].checked_add(a.amount_cents) {
-                    Some(v) => sums[i] = v,
-                    None => overflow = true,
-                }
-            }
-        }
-        let total = sums[..4]
-            .iter()
-            .try_fold(0i64, |sum, v| sum.checked_add(*v));
-        let debt = sums[4];
-        let net = total.and_then(|v| v.checked_sub(debt));
-        let shown = |v: Option<i64>| {
-            v.map(|v| money(v, "CNY"))
-                .unwrap_or_else(|| "超出范围".to_string())
-        };
-        let mut sum_bar = div()
-            .flex()
-            .pt(px(2.))
-            .pb(px(30.))
-            .border_b_1()
-            .border_color(p.line)
-            .child(p.sum_item("总资产", shown(total).into(), p.text, false))
-            .child(p.sum_item("总负债", money(debt, "CNY").into(), p.neg, false))
-            .child(p.sum_item("净资产", shown(net).into(), p.text, true));
-        if overflow || total.is_none() {
-            sum_bar = sum_bar.child(
-                div()
-                    .flex_1()
-                    .text_right()
-                    .text_size(px(12.))
-                    .text_color(p.neg)
-                    .child("金额合计超出整数范围，请检查资产数据"),
-            );
-        }
-        let mut sections = div().flex().flex_col().gap(px(34.));
-        for (index, (code, label)) in CATEGORIES.iter().enumerate() {
-            sections = sections.child(self.asset_section(p, index, code, label, cx));
-        }
-        div()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex()
-                    .items_start()
-                    .justify_between()
-                    .child(p.head(
-                        "资产与负债".into(),
-                        format!("{} 项记录 · 5 个固定分类", self.data.assets.len()).into(),
-                    ))
-                    .child(self.sync_button(p, cx)),
-            )
-            .child(div().h(px(34.)).flex_none())
-            .child(sum_bar)
-            .child(div().h(px(34.)).flex_none())
-            .child(sections)
-    }
+fn summary_metric(
+    label: &'static str,
+    value: impl Into<SharedString>,
+    color: gpui::Rgba,
+    p: &Palette,
+) -> Div {
+    div()
+        .debug_selector(move || format!("asset-summary-{label}"))
+        .flex_none()
+        .flex()
+        .flex_col()
+        .gap(px(4.))
+        .child(t(label, p.text2, FontWeight::NORMAL))
+        .child(super::widgets::n(value, color, M))
 }

@@ -1,21 +1,16 @@
-use super::{
-    components::{Hint, Palette},
-    state::{Confirm, SnowFold},
-};
+use super::{state::SnowFold, widgets::Hint};
+use crate::theme::{Palette, fade};
 use gpui::{prelude::*, *};
-use gpui_component::{
-    Disableable, Icon,
-    input::{Input, InputState},
-    switch::Switch,
-};
+use gpui_component::input::InputState;
 use snowfold_core::{
     CoreError, SnowFoldCore, SyncBackend, SyncConfig, SyncPolicy, SyncStatus, SyncTransport,
 };
 use std::{
-    sync::Arc,
+    sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
 
+/// 设置窗口里的同步表单（输入实体属于设置窗口）。
 pub(super) struct SyncForm {
     pub backend: SyncBackend,
     pub path_style: bool,
@@ -50,7 +45,7 @@ impl SyncForm {
         // 整个输入实体替换，连同编辑撤销历史一起释放，凭证不进入宿主状态副本。
         self.secret = Self::input(true, window, cx);
     }
-    fn load(&mut self, config: &SyncConfig, window: &mut Window, cx: &mut App) {
+    pub fn load_config(&mut self, config: &SyncConfig, window: &mut Window, cx: &mut App) {
         self.backend = config.backend;
         self.path_style = config.path_style;
         for (input, value) in [
@@ -69,7 +64,6 @@ impl SyncForm {
 pub(super) struct SyncUi {
     pub core: Option<Arc<SnowFoldCore>>,
     pub status: Option<SyncStatus>,
-    pub form: SyncForm,
     pub busy: bool,
     pub failure: Option<String>,
     foreground: bool,
@@ -78,13 +72,14 @@ pub(super) struct SyncUi {
     last_attempt: Instant,
     _activation: Option<gpui::Subscription>,
     pub transport: Arc<dyn SyncTransport>,
+    /// 测试注入用：置 true 后 sync_tick 不再自动同步。
+    pub suspend_policy: Arc<AtomicBool>,
 }
 impl SyncUi {
     pub fn new(window: &mut Window, cx: &mut App) -> Self {
         Self {
             core: None,
             status: None,
-            form: SyncForm::new(window, cx),
             busy: false,
             failure: None,
             foreground: window.is_window_active(),
@@ -93,6 +88,7 @@ impl SyncUi {
             last_attempt: Instant::now(),
             _activation: None,
             transport: Arc::new(snowfold_core::sync::RustSyncTransport::default()),
+            suspend_policy: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -128,43 +124,20 @@ impl SnowFold {
         match result {
             Ok(core) => {
                 self.sync.core = Some(core);
-                self.refresh_sync();
+                self.refresh_sync(cx);
                 self.reset_sync_interval();
-                if let Some(config) = self
-                    .sync
-                    .status
-                    .as_ref()
-                    .and_then(|status| status.config.clone())
-                {
-                    self.sync.form.load(&config, window, cx);
-                }
             }
             Err(error) => {
-                self.error = Some(format!("操作失败：{error}"));
+                self.show_error(format!("操作失败：{error}"), cx);
             }
         }
         self.sync._activation = Some(cx.observe_window_activation(window, |this, window, cx| {
             this.sync.foreground = window.is_window_active();
-            if this.sync.foreground
-                && this
-                    .sync
-                    .status
-                    .as_ref()
-                    .is_some_and(|s| s.policy.on_launch)
-            {
-                this.start_sync(false, cx);
+            if this.sync.foreground {
+                this.maybe_sync_on_launch(cx);
             }
         }));
-        cx.defer_in(window, |this, _, cx| {
-            if this
-                .sync
-                .status
-                .as_ref()
-                .is_some_and(|s| s.policy.on_launch)
-            {
-                this.start_sync(false, cx);
-            }
-        });
+        cx.defer_in(window, |this, _, cx| this.maybe_sync_on_launch(cx));
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -175,11 +148,25 @@ impl SnowFold {
         })
         .detach();
     }
-    pub(super) fn refresh_sync(&mut self) {
+    fn maybe_sync_on_launch(&mut self, cx: &mut gpui::Context<Self>) {
+        if self
+            .sync
+            .status
+            .as_ref()
+            .is_some_and(|s| s.policy.on_launch)
+            && !self
+                .sync
+                .suspend_policy
+                .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            self.start_sync(false, cx);
+        }
+    }
+    pub(super) fn refresh_sync(&mut self, cx: &mut gpui::Context<Self>) {
         if let Some(core) = &self.sync.core {
             match core.sync_status() {
                 Ok(status) => self.sync.status = Some(status),
-                Err(error) => self.error = Some(sync_error(error).into()),
+                Err(error) => self.show_error(sync_error(error).to_string(), cx),
             }
         }
     }
@@ -210,6 +197,13 @@ impl SnowFold {
         self.sync.edited_at = Some(Instant::now());
     }
     fn sync_tick(&mut self, cx: &mut gpui::Context<Self>) {
+        if self
+            .sync
+            .suspend_policy
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return;
+        }
         if !self.sync.foreground || self.sync.busy {
             return;
         }
@@ -266,52 +260,37 @@ impl SnowFold {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.sync.busy = false;
-                this.refresh_sync();
+                this.refresh_sync(cx);
                 match result {
                     Ok(report) => {
-                        if this.sync.failure.is_some() && this.error == this.sync.failure {
-                            this.error = None;
+                        if this.sync.failure.is_some() && this.banner_text() == this.sync.failure {
+                            this.banner = None;
                         }
                         this.sync.failure = None;
                         this.undo = None;
-                        this.history = None;
-                        this.popover = None;
                         if let Err(error) = this.reload() {
-                            this.error = Some(format!("操作失败：{error}"));
+                            this.show_error(format!("操作失败：{error}"), cx);
                         }
-                        this.editing = this.editing.filter(|editing| {
-                            use super::state::Editing;
-                            match editing {
-                                Editing::AssetName(id) | Editing::AssetAmount(id) => {
-                                    this.data.assets.iter().any(|a| a.id == *id)
-                                }
-                                Editing::History(id) => {
-                                    this.data.history.iter().any(|h| h.id == *id)
-                                }
-                                Editing::SubscriptionName(id) | Editing::SubscriptionAmount(id) => {
-                                    this.data.subscriptions.iter().any(|s| s.id == *id)
-                                }
-                                Editing::NewAsset(_) | Editing::NewSubscription => true,
-                            }
-                        });
-                        this.highlight = this.highlight.filter(|id| {
-                            this.data.assets.iter().any(|a| a.id == *id)
-                                || this.data.subscriptions.iter().any(|s| s.id == *id)
-                        });
+                        this.selected = this
+                            .selected
+                            .filter(|id| this.data.assets.iter().any(|a| a.id == *id));
                         if report.pending_local_changes {
                             this.sync.pending_at = Some(Instant::now());
                         }
                         if manual {
-                            this.notice = Some(format!(
-                                "同步完成 · 拉取 {} 条 · 上传 {} 条{}",
-                                report.pulled_records,
-                                report.pushed_records,
-                                if report.pending_local_changes {
-                                    "\n同步期间有新改动，下次同步时上传"
-                                } else {
-                                    ""
-                                }
-                            ));
+                            this.notify_info(
+                                format!(
+                                    "同步完成 · 拉取 {} 条 · 上传 {} 条{}",
+                                    report.pulled_records,
+                                    report.pushed_records,
+                                    if report.pending_local_changes {
+                                        "\n同步期间有新改动，下次同步时上传"
+                                    } else {
+                                        ""
+                                    }
+                                ),
+                                cx,
+                            );
                         }
                     }
                     Err(CoreError::Conflict) => {}
@@ -319,7 +298,7 @@ impl SnowFold {
                         let message = sync_error(error).to_string();
                         this.sync.failure = Some(message.clone());
                         if manual {
-                            this.error = Some(message);
+                            this.show_error(message, cx);
                         }
                     }
                 }
@@ -329,31 +308,16 @@ impl SnowFold {
         .detach();
         cx.notify();
     }
-    pub(super) fn save_sync_config(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+    /// 按设置窗口提交的表单保存同步配置。
+    pub(super) fn save_sync_config(
+        &mut self,
+        config: SyncConfig,
+        secret: String,
+        cx: &mut gpui::Context<Self>,
+    ) {
         if self.sync.busy {
             return;
         }
-        let form = &self.sync.form;
-        let s3 = form.backend == SyncBackend::S3;
-        let config = SyncConfig {
-            backend: form.backend,
-            endpoint: form.endpoint.read(cx).value().trim().into(),
-            bucket: if s3 {
-                form.bucket.read(cx).value().trim().into()
-            } else {
-                String::new()
-            },
-            region: if s3 {
-                form.region.read(cx).value().trim().into()
-            } else {
-                String::new()
-            },
-            prefix: form.prefix.read(cx).value().trim().into(),
-            username: form.username.read(cx).value().to_string(),
-            path_style: s3 && form.path_style,
-        };
-        let secret = form.secret.read(cx).value().to_string();
-        self.sync.form.clear_secret(window, cx);
         let result = self
             .sync
             .core
@@ -370,13 +334,13 @@ impl SnowFold {
     ) {
         match result {
             Ok(()) => {
-                self.error = None;
-                self.notice = Some(notice.into());
+                self.banner = None;
+                self.undo = None;
                 self.sync.failure = None;
             }
-            Err(error) => self.error = Some(sync_error(error).into()),
+            Err(error) => self.show_error(sync_error(error).to_string(), cx),
         }
-        self.refresh_sync();
+        self.refresh_sync(cx);
         cx.notify();
     }
     pub(super) fn clear_sync(&mut self, cx: &mut gpui::Context<Self>) {
@@ -387,13 +351,12 @@ impl SnowFold {
             .ok_or(CoreError::SyncNotConfigured)
             .and_then(|core| core.clear_sync_config());
         if result.is_ok() {
-            self.confirm = None;
             self.sync.edited_at = None;
             self.sync.pending_at = None;
         }
         self.sync_result(result, "同步配置已清除", cx);
     }
-    fn set_sync_enabled(&mut self, enabled: bool, cx: &mut gpui::Context<Self>) {
+    pub(super) fn set_sync_enabled(&mut self, enabled: bool, cx: &mut gpui::Context<Self>) {
         if self.sync.busy {
             return;
         }
@@ -414,7 +377,7 @@ impl SnowFold {
         );
         self.reset_sync_interval();
     }
-    fn set_sync_policy(&mut self, policy: SyncPolicy, cx: &mut gpui::Context<Self>) {
+    pub(super) fn set_sync_policy(&mut self, policy: SyncPolicy, cx: &mut gpui::Context<Self>) {
         if self.sync.busy {
             return;
         }
@@ -425,14 +388,14 @@ impl SnowFold {
             .ok_or(CoreError::SyncNotConfigured)
             .and_then(|core| core.set_sync_policy(policy));
         match result {
-            Ok(()) => self.error = None,
-            Err(error) => self.error = Some(sync_error(error).into()),
+            Ok(()) => self.banner = None,
+            Err(error) => self.show_error(sync_error(error).to_string(), cx),
         }
-        self.refresh_sync();
+        self.refresh_sync(cx);
         self.reset_sync_interval();
         cx.notify();
     }
-    fn sync_time(&self) -> String {
+    pub(super) fn sync_time(&self) -> String {
         self.sync
             .status
             .as_ref()
@@ -452,10 +415,18 @@ impl SnowFold {
             })
             .unwrap_or_else(|| "尚未同步".into())
     }
-    pub(super) fn sync_button(&self, p: Palette, cx: &mut gpui::Context<Self>) -> Div {
-        let enabled = self.sync.status.as_ref().is_some_and(|s| s.enabled);
+    pub(super) fn banner_text(&self) -> Option<String> {
+        self.banner.as_ref().map(|b| b.text.clone())
+    }
+    /// 工具栏圆形同步按钮（§5.9）：空闲/同步中（旋转）/失败（右上红点）。
+    pub(super) fn sync_button(
+        &self,
+        p: &Palette,
+        cx: &mut gpui::Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
         let busy = self.sync.busy;
         let failed = self.sync.failure.is_some();
+        let dark = p.dark;
         let time = self.sync_time();
         let hint = if self
             .sync
@@ -467,7 +438,10 @@ impl SnowFold {
         } else {
             "立即同步 · 尚未同步".into()
         };
-        let icon = Icon::default().path("icons/refresh-cw.svg").size(px(16.));
+        let icon = gpui_component::Icon::default()
+            .path("icons/line/refresh.svg")
+            .size(px(20.))
+            .text_color(if busy { p.brand } else { p.text });
         let icon = if busy {
             icon.with_animation(
                 "sync-rotation",
@@ -478,275 +452,46 @@ impl SnowFold {
         } else {
             icon.into_any_element()
         };
-        div().when(enabled, |row| {
-            row.child(
-                div()
-                    .debug_selector(move || {
-                        if failed {
-                            "sync-button-failed".into()
-                        } else {
-                            "sync-button".into()
-                        }
-                    })
-                    .id("sync-now-top")
-                    .tab_index(0)
-                    .tab_stop(p.keyboard && !busy)
-                    .relative()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .size(px(30.))
-                    .rounded(px(8.))
-                    .border_1()
-                    .border_color(transparent_black())
-                    .focus(move |s| s.border_color(p.accent))
-                    .text_color(p.muted)
-                    .when(!busy, |s| s.cursor_pointer().hover(move |s| s.bg(p.subtle)))
-                    .tooltip(move |_, cx| {
-                        cx.new(|_| Hint {
-                            text: hint.clone().into(),
-                            palette: p,
-                        })
-                        .into()
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| this.start_sync(true, cx)))
-                    .child(icon)
-                    .when(failed, |s| {
-                        s.child(
-                            div()
-                                .debug_selector(|| "sync-failure-dot".into())
-                                .absolute()
-                                .top(px(2.))
-                                .right(px(2.))
-                                .size(px(5.))
-                                .rounded_full()
-                                .bg(p.neg),
-                        )
-                    }),
-            )
-        })
-    }
-    pub(super) fn sync_settings(&self, p: Palette, cx: &mut gpui::Context<Self>) -> Div {
-        let status = self.sync.status.as_ref();
-        let configured = status.is_some_and(|s| s.config.is_some());
-        let exported = status.is_some_and(|s| s.recovery_code_exported);
-        let enabled = status.is_some_and(|s| s.enabled);
-        let busy = self.sync.busy;
-        let s3 = self.sync.form.backend == SyncBackend::S3;
-        let note = |text: &'static str| {
-            div()
-                .text_size(px(11.5))
-                .text_color(p.ink3)
-                .line_height(px(18.))
-                .child(text)
-        };
-        let field = |label, input: &Entity<InputState>| {
-            p.field(
-                label,
-                Input::new(input)
-                    .h(px(36.))
-                    .w_full()
-                    .rounded(px(9.))
-                    .text_size(px(13.5))
-                    .disabled(busy),
-            )
-        };
-        let mut rows = vec![note(
-            "数据先用本机同步密钥加密再上传，服务器只能看到密文。只在你打开应用或点「立即同步」时联网。",
-        )];
-        if !exported {
-            rows.push(div().py(px(7.)).flex().flex_col().gap(px(8.)).child(note("开启同步前请先导出恢复码。换机或另一台设备要用同一个恢复码才能解密同步数据。"))
-                .child(p.action_soft("sync-export-recovery", "导出恢复码").on_click(cx.listener(|this, _, _, cx| this.export_recovery_code(cx)))));
-        }
-        let mut backends = div()
+        let button = div()
+            .debug_selector(|| "sync-now".to_string())
+            .id("sync-now")
+            .tab_index(0)
+            .tab_stop(true)
+            .relative()
             .flex()
-            .gap(px(2.))
-            .p(px(3.))
-            .rounded(px(10.))
+            .items_center()
+            .justify_center()
+            .size(px(32.))
+            .rounded_full()
+            .bg(p.material)
             .border_1()
-            .border_color(p.line)
-            .bg(p.subtle);
-        for (backend, label) in [
-            (SyncBackend::S3, "S3 兼容存储"),
-            (SyncBackend::WebDav, "WebDAV"),
-        ] {
-            backends = backends.child(
-                p.segment(label, label, self.sync.form.backend == backend)
-                    .when(!busy, |s| {
-                        s.on_click(cx.listener(move |this, _, window, cx| {
-                            this.sync.form.backend = backend;
-                            this.sync.form.clear_secret(window, cx);
-                            cx.notify();
-                        }))
-                    }),
-            );
-        }
-        let mut form = div()
-            .flex()
-            .flex_col()
-            .gap(px(12.))
-            .py(px(7.))
-            .child(p.field("存储类型", backends))
-            .child(field("服务地址", &self.sync.form.endpoint));
-        if s3 {
-            form = form.child(
-                div()
-                    .flex()
-                    .gap(px(12.))
-                    .child(field("存储桶", &self.sync.form.bucket))
-                    .child(field("区域", &self.sync.form.region)),
-            );
-        }
-        form = form.child(field("路径前缀（可选）", &self.sync.form.prefix));
-        if s3 {
-            form = form.child(
-                p.sheet_row(
-                    "使用路径风格地址",
-                    "",
-                    Switch::new("sync-path-style")
-                        .checked(self.sync.form.path_style)
-                        .disabled(busy)
-                        .on_click(cx.listener(|this, value, _, cx| {
-                            this.sync.form.path_style = *value;
-                            cx.notify();
-                        })),
-                ),
-            );
-        }
-        form = form
-            .child(field(
-                if s3 { "Access Key ID" } else { "用户名" },
-                &self.sync.form.username,
-            ))
-            .child(field(
-                if s3 { "Secret Access Key" } else { "密码" },
-                &self.sync.form.secret,
-            ));
-        if configured {
-            form = form.child(note(
-                "密钥与密码加密保存在本机，不会显示；修改配置时需要重新输入。",
-            ));
-        }
-        form = form.child(
-            p.action_soft("sync-save-config", "保存配置")
-                .when(busy, |s| s.opacity(0.5))
-                .on_click(cx.listener(|this, _, window, cx| this.save_sync_config(window, cx))),
-        );
-        rows.push(form);
-        if configured {
-            rows.push(
-                p.sheet_row(
-                    "开启同步",
-                    "",
-                    Switch::new("sync-enable")
-                        .checked(enabled)
-                        .disabled(busy || !exported)
-                        .on_click(
-                            cx.listener(|this, value, _, cx| this.set_sync_enabled(*value, cx)),
-                        ),
-                ),
-            );
-            let policy = status.unwrap().policy.clone();
-            let on_launch = policy.clone();
-            let after_edit = policy.clone();
-            let interval = policy.clone();
-            let interval_label = match policy.interval_minutes {
-                15 => "每 15 分钟",
-                30 => "每 30 分钟",
-                60 => "每小时",
-                _ => "关闭",
-            };
-            rows.push(p.sheet_group(
-                true,
-                "同步策略",
-                vec![
-                        p.sheet_row(
-                            "打开应用时同步",
-                            "",
-                            Switch::new("sync-on-launch")
-                                .checked(policy.on_launch)
-                                .disabled(busy)
-                                .on_click(cx.listener(move |this, value, _, cx| {
-                                    let mut policy = on_launch.clone();
-                                    policy.on_launch = *value;
-                                    this.set_sync_policy(policy, cx);
-                                })),
-                        ),
-                        p.sheet_row(
-                            "自动同步",
-                            "",
-                            p.field_select("sync-interval", interval_label)
-                                .when(!busy, |s| {
-                                    s.on_click(cx.listener(move |this, _, _, cx| {
-                                        let mut policy = interval.clone();
-                                        policy.interval_minutes = match policy.interval_minutes {
-                                            0 => 15,
-                                            15 => 30,
-                                            30 => 60,
-                                            _ => 0,
-                                        };
-                                        this.set_sync_policy(policy, cx);
-                                    }))
-                                }),
-                        ),
-                        p.sheet_row(
-                            "修改后自动同步",
-                            "",
-                            Switch::new("sync-after-edit")
-                                .checked(policy.after_edit)
-                                .disabled(busy)
-                                .on_click(cx.listener(move |this, value, _, cx| {
-                                    let mut policy = after_edit.clone();
-                                    policy.after_edit = *value;
-                                    this.set_sync_policy(policy, cx);
-                                })),
-                        ),
-                        note("自动同步只在应用打开时进行，关闭应用后不会在后台联网。"),
-                    ],
-            ));
-            let state_text = if busy {
-                "正在同步…".into()
-            } else if status.unwrap().last_synced_at.is_some() {
-                format!("上次同步 {}", self.sync_time())
-            } else {
-                "尚未同步".into()
-            };
-            rows.push(div().py(px(7.)).text_size(px(12.5)).child(state_text));
-            if let Some(error) = &self.sync.failure {
-                rows.push(
+            .border_color(p.material_edge)
+            .when(!busy, |s| {
+                s.cursor_pointer().hover(move |s| s.bg(p.hover()))
+            })
+            .focus(move |s| s.border_3().border_color(fade(p.brand, 0.4)))
+            .tooltip(move |_, cx| {
+                cx.new(|_| Hint {
+                    text: hint.clone().into(),
+                    dark,
+                })
+                .into()
+            })
+            .on_click(cx.listener(|this, _, _, cx| this.start_sync(true, cx)))
+            .child(icon)
+            .when(failed, |s| {
+                s.child(
                     div()
-                        .text_size(px(11.5))
-                        .text_color(p.neg)
-                        .child(error.clone()),
-                );
-            }
-            rows.push(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .py(px(7.))
-                    .child(
-                        p.action_soft("sync-now-settings", "立即同步")
-                            .when(busy || !enabled, |s| s.opacity(0.5))
-                            .on_click(cx.listener(|this, _, _, cx| this.start_sync(true, cx))),
-                    )
-                    .child(
-                        p.action_danger("sync-clear-config", "清除配置")
-                            .when(busy, |s| s.opacity(0.5))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                if !this.sync.busy {
-                                    this.confirm = Some(Confirm::ClearSync);
-                                    this.modal_focus.focus(window);
-                                    cx.notify();
-                                }
-                            })),
-                    ),
-            );
-        }
-        rows.push(note(
-            "在另一台设备上导入本机的恢复码，并填写相同的存储配置，即可同步同一份数据。",
-        ));
-        p.sheet_group(false, "同步", rows)
+                        .absolute()
+                        .top(px(2.))
+                        .right(px(2.))
+                        .size(px(8.))
+                        .rounded_full()
+                        .border_2()
+                        .border_color(p.card)
+                        .bg(p.neg),
+                )
+            });
+        button
     }
 }
