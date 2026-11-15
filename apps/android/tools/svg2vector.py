@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""Convert shared/icons/ui Lucide SVGs (24x24 stroke icons) into Android
-vector drawables. Stdlib only; runs from a Gradle Exec task. Shapes are
-converted to pathData; strokes keep round caps/joins at width 2. Compose
-Icon() recolors the drawable, so strokes use opaque black.
+"""将 shared/icons/line 与 fill 的 IconMCP SVG 生成 Compose ImageVector。
+仅依赖 Python 标准库；保留填充、描边与源 SVG 的旋转组（chevron-left）。
 """
 import re
 import sys
@@ -12,19 +10,19 @@ from pathlib import Path
 SVG_NS = "{http://www.w3.org/2000/svg}"
 
 
-def num(value: str, default: float = 0.0) -> float:
+def num(value, default=0.0):
     try:
         return float(str(value).strip().rstrip("px"))
     except (TypeError, ValueError):
         return default
 
 
-def fmt(value: float) -> str:
+def fmt(value):
     text = f"{value:.4f}".rstrip("0").rstrip(".")
     return text if text else "0"
 
 
-def circle_to_path(attrib: dict) -> str:
+def circle_to_path(attrib):
     cx, cy, r = num(attrib.get("cx")), num(attrib.get("cy")), num(attrib.get("r"))
     return (
         f"M {fmt(cx - r)} {fmt(cy)} "
@@ -33,14 +31,14 @@ def circle_to_path(attrib: dict) -> str:
     )
 
 
-def line_to_path(attrib: dict) -> str:
+def line_to_path(attrib):
     return (
         f"M {fmt(num(attrib.get('x1')))} {fmt(num(attrib.get('y1')))} "
         f"L {fmt(num(attrib.get('x2')))} {fmt(num(attrib.get('y2')))}"
     )
 
 
-def rect_to_path(attrib: dict) -> str:
+def rect_to_path(attrib):
     x, y = num(attrib.get("x")), num(attrib.get("y"))
     w, h = num(attrib.get("width")), num(attrib.get("height"))
     rx = num(attrib.get("rx"), 0.0)
@@ -58,7 +56,7 @@ def rect_to_path(attrib: dict) -> str:
     )
 
 
-def poly_to_path(attrib: dict, close: bool) -> str:
+def poly_to_path(attrib, close):
     points = re.findall(r"[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?\d+)?", attrib.get("points", ""))
     coords = [f"{fmt(float(points[i]))} {fmt(float(points[i + 1]))}" for i in range(0, len(points) - 1, 2)]
     if len(coords) < 2:
@@ -67,61 +65,83 @@ def poly_to_path(attrib: dict, close: bool) -> str:
     return body + (" Z" if close else "")
 
 
-def shape_paths(root: ET.Element) -> list[str]:
-    paths: list[str] = []
+def shape_path(tag, attrib):
+    if tag == "path":
+        return attrib.get("d", "").strip()
+    if tag == "circle":
+        return circle_to_path(attrib)
+    if tag == "line":
+        return line_to_path(attrib)
+    if tag == "rect":
+        return rect_to_path(attrib)
+    if tag == "polyline":
+        return poly_to_path(attrib, False)
+    if tag == "polygon":
+        return poly_to_path(attrib, True)
+    return ""
+
+
+def icon_paths(root):
+    """提取填充、描边与旋转；遇到资源集中未约定的变换就报错。"""
+    root_fill = root.get("fill", "none")
+    root_stroke = root.get("stroke", "none")
+    fills, strokes = [], []
+    rotation = 0
     for element in root.iter():
         tag = element.tag.replace(SVG_NS, "")
         attrib = {key.replace(SVG_NS, ""): value for key, value in element.attrib.items()}
-        if tag == "path":
-            data = attrib.get("d", "").strip()
-            if data:
-                paths.append(data)
-        elif tag == "circle":
-            paths.append(circle_to_path(attrib))
-        elif tag == "line":
-            paths.append(line_to_path(attrib))
-        elif tag == "rect":
-            paths.append(rect_to_path(attrib))
-        elif tag == "polyline":
-            paths.append(poly_to_path(attrib, close=False))
-        elif tag == "polygon":
-            paths.append(poly_to_path(attrib, close=True))
-    return [p for p in paths if p]
+        if tag in ("svg", "g"):
+            if attrib.get("transform"):
+                match = re.fullmatch(r"rotate\(\s*(-?\d+)\s+8\s+8\s*\)", attrib["transform"])
+                if not match:
+                    raise ValueError(f"不支持的 SVG 变换：{attrib['transform']}")
+                rotation += int(match.group(1))
+            continue
+        data = shape_path(tag, attrib)
+        if not data:
+            continue
+        fill = attrib.get("fill", root_fill)
+        stroke = attrib.get("stroke", root_stroke)
+        if fill not in (None, "", "none"):
+            fills.append(data)
+        if stroke not in (None, "", "none"):
+            strokes.append(data)
+    return fills, strokes, rotation
 
 
-def kotlin_escape(text: str) -> str:
+def kotlin_escape(text):
     return text.replace("\\", "\\\\").replace("\"", "\\\"")
 
 
-def convert(source_dir: Path, output_dir: Path) -> int:
+def convert(line_dir: Path, fill_dir: Path, output_dir: Path) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
-    icons: list[tuple[str, str]] = []
-    for svg in sorted(source_dir.glob("*.svg")):
-        try:
+    sets = [("line", line_dir), ("fill", fill_dir)]
+    generated = {}
+    for prefix, source in sets:
+        for svg in sorted(source.glob("*.svg")):
             root = ET.parse(svg).getroot()
-        except ET.ParseError as error:
-            print(f"skip {svg.name}: {error}", file=sys.stderr)
-            continue
-        view_box = (root.get("viewBox") or "0 0 24 24").split()
-        if len(view_box) != 4 or (view_box[2], view_box[3]) != ("24", "24"):
-            # 品牌图形（mark.svg 等）不是 24x24 行内图标，跳过。
-            print(f"skip {svg.name}: viewBox {root.get('viewBox')}")
-            continue
-        paths = shape_paths(root)
-        if not paths:
-            print(f"skip {svg.name}: no shapes", file=sys.stderr)
-            continue
-        icons.append((svg.stem.replace("-", "_"), " ".join(paths)))
+            view_box = (root.get("viewBox") or "0 0 16 16").split()
+            if len(view_box) != 4 or (view_box[2], view_box[3]) != ("16", "16"):
+                print(f"skip {prefix}/{svg.name}: viewBox {root.get('viewBox')}")
+                continue
+            fills, strokes, rotation = icon_paths(root)
+            if not fills and not strokes:
+                print(f"skip {prefix}/{svg.name}: no shapes")
+                continue
+            generated[f"{prefix}_{svg.stem.replace('-', '_')}"] = (fills, strokes, rotation)
 
     body = []
-    for name, data in icons:
-        body.append(
-            f'    val ic_{name}: ImageVector by lazy {{\n'
-            f'        icon("ic_{name}", listOf("{kotlin_escape(data)}"))\n'
-            f"    }}\n"
-        )
+    for name, (fills, strokes, rotation) in generated.items():
+        body.append(f"    val ic_{name}: ImageVector by lazy {{\n")
+        body.append("        icon(\n")
+        body.append(f'            "ic_{name}",\n')
+        body.append(f'            fills = listOf({", ".join(chr(34) + kotlin_escape(d) + chr(34) for d in fills)}),\n')
+        body.append(f'            strokes = listOf({", ".join(chr(34) + kotlin_escape(d) + chr(34) for d in strokes)}),\n')
+        body.append(f"            rotation = {rotation}f,\n")
+        body.append("        )\n    }\n\n")
+
     code = (
-        "// GENERATED from shared/icons/ui (Lucide) by tools/svg2vector.py - do not edit.\n"
+        "// 由 tools/svg2vector.py 从共用 IconMCP 图标生成，不要手改。\n"
         "package app.snowfold.ui.components\n\n"
         "import androidx.compose.ui.graphics.Color\n"
         "import androidx.compose.ui.graphics.SolidColor\n"
@@ -130,34 +150,43 @@ def convert(source_dir: Path, output_dir: Path) -> int:
         "import androidx.compose.ui.graphics.vector.ImageVector\n"
         "import androidx.compose.ui.graphics.vector.PathParser\n"
         "import androidx.compose.ui.unit.Dp\n\n"
-        "private fun icon(name: String, paths: List<String>): ImageVector =\n"
+        "private fun icon(name: String, fills: List<String>, strokes: List<String>, rotation: Float): ImageVector =\n"
         "    ImageVector.Builder(\n"
-        '        name = name,\n'
-        "        defaultWidth = Dp(24f),\n"
-        "        defaultHeight = Dp(24f),\n"
-        "        viewportWidth = 24f,\n"
-        "        viewportHeight = 24f,\n"
+        "        name = name,\n"
+        "        defaultWidth = Dp(16f),\n"
+        "        defaultHeight = Dp(16f),\n"
+        "        viewportWidth = 16f,\n"
+        "        viewportHeight = 16f,\n"
         "    ).apply {\n"
-        "        paths.forEach { data ->\n"
+        "        addGroup(rotate = rotation, pivotX = 8f, pivotY = 8f)\n"
+        "        fills.forEach { data ->\n"
+        "            addPath(\n"
+        "                pathData = PathParser().parsePathString(data).toNodes(),\n"
+        "                fill = SolidColor(Color.Black),\n"
+        "                fillAlpha = 1f,\n"
+        "            )\n"
+        "        }\n"
+        "        strokes.forEach { data ->\n"
         "            addPath(\n"
         "                pathData = PathParser().parsePathString(data).toNodes(),\n"
         "                fill = null,\n"
         "                stroke = SolidColor(Color.Black),\n"
-        "                strokeLineWidth = 2f,\n"
+        "                strokeLineWidth = 0.833f,\n"
         "                strokeLineCap = StrokeCap.Round,\n"
         "                strokeLineJoin = StrokeJoin.Round,\n"
         "            )\n"
         "        }\n"
+        "        clearGroup()\n"
         "    }.build()\n\n"
-        "/** Lucide 语义图标（docs/design.md §4 Android 列）。 */\n"
+        "/** IconMCP 线条/实心图标（docs/design.md §3）。 */\n"
         "object IconsGen {\n" + "\n".join(body) + "}\n"
     )
     (output_dir / "IconsGen.kt").write_text(code, encoding="utf-8")
     for stale in output_dir.glob("*.xml"):
         stale.unlink()
-    print(f"converted {len(icons)} icons -> {output_dir}/IconsGen.kt")
-    return len(icons)
+    print(f"converted {len(generated)} icons -> {output_dir}/IconsGen.kt")
+    return len(generated)
 
 
 if __name__ == "__main__":
-    convert(Path(sys.argv[1]), Path(sys.argv[2]))
+    convert(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]))

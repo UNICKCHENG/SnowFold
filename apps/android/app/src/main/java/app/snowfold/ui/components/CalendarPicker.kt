@@ -2,22 +2,18 @@ package app.snowfold.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,30 +21,31 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.snowfold.R
+import app.snowfold.ui.theme.SnowFoldType
+import app.snowfold.ui.theme.appColors
+import app.snowfold.ui.theme.appType
 import java.time.LocalDate
 import java.time.YearMonth
 
 /**
- * Month calendar used by every date field. Weekday captions and the month
- * title come from the frozen copy resources, so the picker reads the same as
- * the rest of the app regardless of the system locale. Plain rows keep the
- * calendar usable inside scrollable sheet content.
+ * 月份日历（日期字段的内联选择器）：星期表头与月份标题来自冻结文案，
+ * 选中圆底一律 brand；底部「应用日期」确认。放在卡片里使用。
  */
 @Composable
-fun CalendarPicker(
+fun calendarInline(
     initial: LocalDate,
     onApplied: (LocalDate) -> Unit,
     onCancelled: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var month by remember { mutableStateOf(YearMonth.from(initial)) }
-    var selected by remember { mutableStateOf(initial) }
+    val colors = appColors()
+    var month by remember(initial) { mutableStateOf(YearMonth.from(initial)) }
+    var selected by remember(initial) { mutableStateOf(initial) }
     val weekdayHeads = listOf(
         stringResource(R.string.weekday_sunday),
         stringResource(R.string.weekday_monday),
@@ -58,72 +55,73 @@ fun CalendarPicker(
         stringResource(R.string.weekday_friday),
         stringResource(R.string.weekday_saturday),
     )
-    val leadingBlanks = month.atDay(1).dayOfWeek.value % 7 // Sunday-first grid
-    val cells: List<LocalDate?> =
-        List(leadingBlanks) { null } + (1..month.lengthOfMonth()).map { month.atDay(it) }
+    val leadingBlanks = month.atDay(1).dayOfWeek.value % 7 // 周日开头
+    val cells: List<LocalDate?> = List(leadingBlanks) { null } + (1..month.lengthOfMonth()).map { month.atDay(it) }
 
-    Column(modifier = modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                text = stringResource(R.string.month_title, month.year, month.monthValue),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
+                stringResource(R.string.month_title, month.year, month.monthValue),
+                style = SnowFoldType.headline.appType(),
+                color = colors.text,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = { month = month.minusMonths(1) }) {
-                Icon(
-                    Icons.AutoMirrored.Outlined.ArrowBack,
-                    contentDescription = stringResource(R.string.cd_previous_month),
-                )
-            }
-            IconButton(onClick = { month = month.plusMonths(1) }) {
-                Icon(
-                    Icons.AutoMirrored.Outlined.ArrowForward,
-                    contentDescription = stringResource(R.string.cd_next_month),
-                )
-            }
+            Icon(
+                AppIcon.chevronLeft,
+                contentDescription = stringResource(R.string.cd_previous_month),
+                tint = colors.text2,
+                modifier = Modifier
+                    .size(44.dp)
+                    .padding(12.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { month = month.minusMonths(1) },
+            )
+            Icon(
+                AppIcon.chevronRight,
+                contentDescription = stringResource(R.string.cd_next_month),
+                tint = colors.text2,
+                modifier = Modifier
+                    .size(44.dp)
+                    .padding(12.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { month = month.plusMonths(1) },
+            )
         }
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth()) {
             weekdayHeads.forEach { head ->
-                Box(modifier = Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = head,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(head, style = SnowFoldType.caption.appType(), color = colors.text2, textAlign = TextAlign.Center)
                 }
             }
         }
         cells.chunked(7).forEach { week ->
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+            Row(Modifier.fillMaxWidth()) {
                 week.forEach { day ->
-                    Box(
-                        modifier = Modifier.size(44.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
+                    Box(Modifier.weight(1f).height(48.dp), contentAlignment = Alignment.Center) {
                         if (day != null) {
                             val isSelected = day == selected
-                            val isToday = day == LocalDate.now()
                             Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .background(
-                                        if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                        CircleShape,
-                                    )
-                                    .clickable { selected = day },
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) colors.brand else androidx.compose.ui.graphics.Color.Transparent)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                    ) { selected = day },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    text = day.dayOfMonth.toString(),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (isSelected || isToday) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = when {
-                                        isSelected -> MaterialTheme.colorScheme.onPrimary
-                                        isToday -> MaterialTheme.colorScheme.primary
-                                        else -> MaterialTheme.colorScheme.onSurface
-                                    },
+                                    day.dayOfMonth.toString(),
+                                    style = SnowFoldType.caption.appType(),
+                                    color = if (isSelected) colors.onBrand else colors.text,
                                 )
                             }
                         }
@@ -131,14 +129,14 @@ fun CalendarPicker(
                 }
             }
         }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            TextButton(onClick = onCancelled) { Text(stringResource(R.string.cancel)) }
-            TextButton(onClick = { onApplied(selected) }) { Text(stringResource(R.string.apply_date)) }
+        Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End) {
+            app.snowfold.ui.components.SfButton(
+                stringResource(R.string.apply_date),
+                { onApplied(selected) },
+                style = app.snowfold.ui.components.ButtonStyle.Primary,
+                inlineHeight = 32.dp,
+                testTag = "calendar-apply",
+            )
         }
     }
 }

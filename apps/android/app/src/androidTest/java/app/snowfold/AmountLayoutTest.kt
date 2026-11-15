@@ -45,8 +45,9 @@ class AmountLayoutTest {
                     listOf(1f, 2f).forEach { scale ->
                         CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, scale)) {
                             amounts.forEachIndexed { index, amount ->
-                                AmountText(amount, SnowFoldType.hero,
-                                    Modifier.width(296.dp).testTag("amount-$scale-$index"), decimalHierarchy = true)
+                                AmountText(amount, app.snowfold.ui.components.AmountLevel.Display,
+                                    Modifier.width(296.dp).testTag("amount-$scale-$index"),
+                                    negative = amount.startsWith("−"))
                             }
                         }
                     }
@@ -98,20 +99,32 @@ class AmountLayoutTest {
 
     private fun overviewScreenshot(scale: Float, filename: String) {
         val amount = formatMoney(1234567890L, "CNY")
-        val ui = UiLedger(LocalDate.of(2026, 11, 14), emptyList(), emptyList(), emptyList(), 0,
-            emptyList(), emptyList(), HeroUi(amount, false, amount, formatMoney(0L, "CNY"), "0.0%"),
-            null, SubscriptionSummary.None, null, emptyList(), false)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val fixture = File(context.cacheDir, "amount-layout-$filename").apply { mkdirs() }
+        val core = app.snowfold.core.SnowFoldCore.open(fixture.absolutePath, app.snowfold.platform.AndroidSecureKeyStore(context))
+        val ui = try {
+            core.clearData()
+            core.createAsset("cash", "招商银行家庭备用金账户", 1234567890L)
+            val gateway = app.snowfold.data.RustLedgerGateway(core)
+            val today = LocalDate.of(2026, 11, 14)
+            gateway.toUiLedger(core.data(), gateway.overview(today), today)
+        } finally {
+            core.destroy()
+            fixture.deleteRecursively()
+        }
         compose.setContent {
             SnowFoldTheme {
                 CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, scale)) {
-                    OverviewScreen(ui, null, null, {}, {}, {}, expanded = false, modifier = Modifier.width(360.dp))
+                    OverviewScreen(ui = ui, bannerText = null, overflowText = null,
+                        onGoAssets = {}, onGoSubscriptions = {}, tablet = false,
+                        modifier = Modifier.width(360.dp))
                 }
             }
         }
         val results = mutableListOf<TextLayoutResult>()
         compose.onAllNodesWithText(amount.substringBefore("."), substring = true, useUnmergedTree = true)[0].performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
         val image = compose.onRoot().captureToImage().asAndroidBitmap()
-        val file = File(InstrumentationRegistry.getInstrumentation().targetContext.filesDir, filename)
+        val file = File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null)!!, filename)
         file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         val layout = results.single()
         assertFalse("${layout.layoutInput.text.text}, size=${layout.size}, lines=${layout.lineCount}, height=${layout.didOverflowHeight}, width=${layout.didOverflowWidth}, textHeight=${layout.multiParagraph.height}", layout.hasVisualOverflow)

@@ -28,7 +28,7 @@
     <string name="annual_spending">年化支出</string>
     <string name="annual_spending_help">按扣费周期折算为全年支出</string>
     <string name="due_this_month_help">在用订阅中，下次扣费日落在当前自然月的金额合计（含本月已过期、待确认的）</string>
-    <string name="monthly_spending_help">按各订阅的扣费周期折算到每月的平均支出</string>
+    <string name="monthly_spending_help">月均为年化合计 ÷ 12 后舍入</string>
     <string name="next_charge">下一个扣费</string>
     <string name="subscription_summary">%1$d 个订阅</string>
     <string name="subscription_summary_overdue">%1$d 个订阅 · %2$d 笔待确认</string>
@@ -89,7 +89,7 @@
     <string name="history_count_inline">变动 %1$d 条</string>
     <string name="history_current">当前</string>
     <string name="history_initial">初始</string>
-    <string name="new_subscription_help">名称与金额必填。保存后按周期计算下次扣费；到期时进入「待确认」，点一下即可顺延。</string>
+    <string name="new_subscription_help">填写名称、金额并选择下次扣费日。到期确认续费后按周期顺延。</string>
 
     <!-- 按钮 -->
     <string name="done">完成</string>
@@ -101,7 +101,7 @@
     <string name="new_subscription">＋ 新建订阅</string>
     <string name="correct_history">修正</string>
     <string name="apply_date">应用日期</string>
-    <string name="mark_renewed">✓ 已续费</string>
+    <string name="mark_renewed">已续费</string>
     <string name="pause">暂停</string>
     <string name="resume">恢复</string>
     <string name="undo">撤销 · 6秒内</string>
@@ -121,8 +121,8 @@
     <string name="no_subscriptions">还没有订阅</string>
     <string name="no_subscriptions_help">记下常用服务，随时知道接下来要扣多少钱</string>
     <string name="no_charges">暂无扣费</string>
-    <string name="no_upcoming_charges">未来 30 天没有待扣费用</string>
-    <string name="theme_help">跟随系统会自动匹配电脑的深浅色。</string>
+    <string name="no_upcoming_charges">未来 30 天没有扣费</string>
+    <string name="theme_help">「自动」会跟随系统的深浅色。</string>
     <string name="export_backup_title">导出备份</string>
     <string name="export_backup_help">保存为 JSON 文件，可随时导入恢复。</string>
     <string name="import_backup_title">导入备份</string>
@@ -158,7 +158,7 @@
     <string name="key_replaced">同步密钥已替换 · 指纹 %1$s（旧密钥已备份为 .bak）</string>
     <string name="subscription_renewed">已顺延 %1$s 期</string>
     <string name="startup_backup_failed">启动备份失败：%1$s。原数据未改变，请检查数据目录权限。</string>
-    <string name="startup_key_unavailable">本机密钥已失效，请用恢复码恢复</string>
+    <string name="startup_key_unavailable">请检查密钥文件或导入恢复码。加密备份暂时无法导出或导入；可以在设置里导入恢复码，或处理密钥文件后重启。</string>
     <string name="local_data_unreadable">无法读取本机数据：%1$s。请检查数据目录权限后重新打开。</string>
     <string name="operation_failed">操作失败：%1$s。请检查输入或数据目录后重试。</string>
     <string name="theme_not_saved">主题未保存：%1$s</string>
@@ -193,7 +193,7 @@
     <string name="error_incompatible_backup">不支持的备份版本或加密格式</string>
     <string name="error_invalid_backup">备份内容不完整或不合法，原数据未改变</string>
     <string name="error_invalid_recovery_code">恢复码不合法，本机密钥未改变</string>
-    <string name="error_key_unavailable">本机密钥已失效，请用恢复码恢复</string>
+    <string name="error_key_unavailable">同步密钥不可用，请检查密钥文件或导入恢复码</string>
     <string name="error_io">无法读写文件，请检查目录与权限</string>
     <string name="error_database">无法读写本机数据库</string>
     <string name="error_incompatible_database">数据库版本不兼容，原文件未改动</string>
@@ -213,6 +213,9 @@
     <string name="cd_delete_asset">删除资产</string>
     <string name="cd_delete_subscription">删除订阅</string>
     <string name="cd_stats_info">查看统计口径说明</string>
+    <!-- docs/design.md §6.1：统计说明读屏名带指标。 -->
+    <string name="cd_monthly_info">月均支出口径说明</string>
+    <string name="cd_annual_info">年化支出口径说明</string>
     <string name="cd_previous_month">上个月</string>
     <string name="cd_next_month">下个月</string>
     <string name="cd_pick_date">选择日期</string>
@@ -312,4 +315,42 @@
     <string name="error_sync_incompatible">远端数据来自更新版本的 SnowFold，请先升级</string>
     <string name="error_sync_busy">正在同步或修改配置，请稍后再试</string>
     <string name="error_sync_config_invalid">请检查服务地址（须为 https://）、存储桶、区域与凭证</string>
+    <!-- 界面重做新增（docs/copy.md「界面重做新增」一节） -->
+    <string name="overview_empty_title">还没有记录</string>
+    <string name="overview_empty_help">记下第一笔资产，净资产会显示在这里</string>
+    <string name="add_asset">添加资产</string>
+    <string name="assets_empty_title">还没有资产</string>
+    <string name="assets_empty_help">现金、房产、投资、借出和欠款都可以记</string>
+    <string name="category_empty">暂无%1$s</string>
+    <string name="adjust_balance_title">调整余额</string>
+    <string name="rename">重命名</string>
+    <string name="delete">删除</string>
+    <string name="delete_subscription">删除订阅</string>
+    <string name="correct_history_title">修正历史</string>
+    <string name="edit_subscription_title">编辑订阅</string>
+    <string name="category_label">分类</string>
+    <string name="asset_label">资产</string>
+    <string name="current_balance_label">当前余额</string>
+    <string name="new_balance_label">新余额</string>
+    <string name="history_time_label">记录时间</string>
+    <string name="original_amount_label">原金额</string>
+    <string name="corrected_amount_label">修正为</string>
+    <string name="history_section">变动记录</string>
+    <string name="history_note">修正不会新增快照</string>
+    <string name="asset_meta">更新于 %1$s · 历史 %2$d 条</string>
+    <string name="records_label">记录</string>
+    <string name="asset_name_placeholder">例如：招商银行 储蓄卡</string>
+    <string name="subscription_name_placeholder">例如：Netflix</string>
+    <string name="choose_date_placeholder">选择日期</string>
+    <string name="sync_storage_label">存储</string>
+    <string name="sync_edit_config">修改</string>
+    <string name="startup_error_title">无法打开数据</string>
+    <string name="key_unavailable_title">同步密钥不可用</string>
+    <string name="more_currency">+ %1$s</string>
+    <string name="clear_confirm">清空</string>
+    <string name="cd_copy">复制</string>
+    <string name="composition_count">%1$d 项</string>
+    <string name="composition_excluded">不计入资产构成</string>
+    <string name="group_count_suffix">　%1$d</string>
+
 </resources>

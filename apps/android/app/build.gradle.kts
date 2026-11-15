@@ -21,16 +21,53 @@ val bindgenDirectory = repositoryRoot.resolve(providers.gradleProperty("rust.bin
 val cargoTargetDirectory = providers.environmentVariable("CARGO_TARGET_DIR").orElse(repositoryRoot.resolve("target").path).get()
 val generatedJniLibs = layout.buildDirectory.dir("generated/jniLibs")
 val generatedKotlin = layout.buildDirectory.dir("generated/uniffi/kotlin")
-val sharedIconsDirectory = repositoryRoot.resolve("shared/icons/ui")
+val sharedIconsLine = repositoryRoot.resolve("shared/icons/line")
+val sharedIconsFill = repositoryRoot.resolve("shared/icons/fill")
 val generatedIcons = layout.buildDirectory.dir("generated/iconsKt")
 
-// shared/icons/ui 的 Lucide SVG 构建时转成 vector drawable（规范 docs/design.md §4）。
+// shared/fonts/inter 的 InterVariable.ttf 复制进 res/font（docs/design.md §2）。
+abstract class CopyFontTask : DefaultTask() {
+    @get:InputFile
+    val source = project.objects.fileProperty()
+
+    @get:InputFile
+    val fontLicense = project.objects.fileProperty()
+
+    @get:InputFile
+    val iconLicense = project.objects.fileProperty()
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun run() {
+        val dir = outputDirectory.asFile.get().resolve("font").apply { mkdirs() }
+        source.asFile.get().copyTo(dir.resolve("inter_variable.ttf"), overwrite = true)
+        val notices = outputDirectory.asFile.get().resolve("raw").apply { mkdirs() }
+        fontLicense.asFile.get().copyTo(notices.resolve("inter_license.txt"), overwrite = true)
+        iconLicense.asFile.get().copyTo(notices.resolve("iconmcp_license.txt"), overwrite = true)
+    }
+}
+
+val copyFonts = tasks.register<CopyFontTask>("copyFonts") {
+    group = "build"
+    description = "把共用 Inter 变量字体复制到生成的 res/font。"
+    source.set(repositoryRoot.resolve("shared/fonts/inter/InterVariable.ttf"))
+    fontLicense.set(repositoryRoot.resolve("shared/fonts/inter/LICENSE.txt"))
+    iconLicense.set(repositoryRoot.resolve("shared/icons/LICENSE-IconMCP.txt"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/res-font"))
+}
+
+// shared/icons/line 与 fill 的 IconMCP SVG 构建时转成 ImageVector。
 abstract class GenerateIconsTask : DefaultTask() {
     @get:InputFile
     val script = project.objects.fileProperty()
 
     @get:InputDirectory
     val inputDirectory = project.objects.directoryProperty()
+
+    @get:InputDirectory
+    val secondInputDirectory = project.objects.directoryProperty()
 
     @get:InputFiles
     val svgs = project.objects.fileCollection()
@@ -48,6 +85,7 @@ abstract class GenerateIconsTask : DefaultTask() {
                 "python3",
                 script.asFile.get().absolutePath,
                 inputDirectory.asFile.get().absolutePath,
+                secondInputDirectory.asFile.get().absolutePath,
                 outputDirectory.asFile.get().absolutePath,
             )
         }
@@ -56,10 +94,11 @@ abstract class GenerateIconsTask : DefaultTask() {
 
 val generateIcons = tasks.register<GenerateIconsTask>("generateIcons") {
     group = "build"
-    description = "Convert shared Lucide SVG icons into Android vector drawables."
+    description = "把共用 IconMCP 线条与实心 SVG 生成 Compose ImageVector。"
     script.set(project.layout.projectDirectory.file("../tools/svg2vector.py"))
-    inputDirectory.set(sharedIconsDirectory)
-    svgs.setFrom(fileTree(sharedIconsDirectory) { include("*.svg") })
+    inputDirectory.set(sharedIconsLine)
+    secondInputDirectory.set(sharedIconsFill)
+    svgs.setFrom(files(fileTree(sharedIconsLine) { include("*.svg") }, fileTree(sharedIconsFill) { include("*.svg") }))
     outputDirectory.set(generatedIcons)
 }
 val minimumSdk = 26
@@ -124,6 +163,7 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+
 }
 
 kotlin {
@@ -187,19 +227,19 @@ androidComponents {
         variant.sources.java?.addGeneratedSourceDirectory(generateIcons, GenerateIconsTask::outputDirectory)
         variant.sources.java?.addGeneratedSourceDirectory(generateCoreBindings, GenerateDirectoryTask::outputDirectory)
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildRust, GenerateDirectoryTask::outputDirectory)
+        // InterVariable.ttf 由 copyFonts 复制进生成 res/font（docs/design.md §2）。
+        variant.sources.res?.addGeneratedSourceDirectory(copyFonts, CopyFontTask::outputDirectory)
     }
 }
 
 tasks.named("preBuild") {
-    dependsOn(generateCoreBindings)
+    dependsOn(generateCoreBindings, copyFonts)
 }
 
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material3:material3-window-size-class")
-    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.9.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.11.0")

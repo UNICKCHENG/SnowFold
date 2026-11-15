@@ -2,6 +2,7 @@ package app.snowfold
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -9,16 +10,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
-import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
-import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
-import androidx.activity.SystemBarStyle
 import app.snowfold.core.ThemePreference
 import app.snowfold.ui.nav.AppRoot
 import app.snowfold.ui.theme.SnowFoldTheme
 
 class MainActivity : ComponentActivity() {
-    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -31,7 +27,7 @@ class MainActivity : ComponentActivity() {
                 ThemePreference.DARK -> true
                 ThemePreference.SYSTEM -> isSystemInDarkTheme()
             }
-            // Keep system bar icon contrast in step with the app-controlled theme.
+            // 系统栏图标对比度跟随应用控制的深浅色。
             LaunchedEffect(darkTheme) {
                 enableEdgeToEdge(
                     statusBarStyle = SystemBarStyle.auto(
@@ -44,11 +40,8 @@ class MainActivity : ComponentActivity() {
                     ) { darkTheme },
                 )
             }
-            val windowSizeClass = calculateWindowSizeClass(this)
             SnowFoldTheme(darkTheme = darkTheme) {
-                val expanded = windowSizeClass.widthSizeClass >= WindowWidthSizeClass.Medium
-                val wideTablet = expanded
-                AppRoot(vm = vm, expanded = expanded, wideTablet = wideTablet)
+                AppRoot(vm = vm)
             }
         }
     }

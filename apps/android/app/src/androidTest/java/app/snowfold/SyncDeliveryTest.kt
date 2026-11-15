@@ -125,7 +125,7 @@ class SyncDeliveryTest {
         compose.waitForIdle()
         val prefix = args.getString("capturePrefix") ?: "m7-phone-light"
         val image = instrumentation.uiAutomation.takeScreenshot()
-        File(context.filesDir, "$prefix-$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File(context.getExternalFilesDir(null)!!, "$prefix-$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         image.recycle()
     }
 
@@ -144,17 +144,24 @@ class SyncDeliveryTest {
             compose.onNodeWithTag("sync-button").performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("sync-failed-dot", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
             screenshot("overview-sync-failed")
+            // 手动同步失败会弹出错误通知胶囊，关闭它，避免浮层遮住设置页底部的行
+            compose.onNodeWithContentDescription(context.getString(R.string.close)).performClick()
+            compose.waitForIdle()
             if (compose.onAllNodesWithTag("nav-settings").fetchSemanticsNodes().isNotEmpty()) compose.onNodeWithTag("nav-settings").performClick()
             else compose.onNodeWithContentDescription(context.getString(R.string.cd_settings)).performClick()
-            compose.onNodeWithTag("sync-backend").performScrollTo()
-            screenshot("settings-sync-s3")
-            compose.onNodeWithTag("sync-secret").performScrollTo()
-            screenshot("settings-sync-s3-credentials")
+            // 已配置态（mobile-layout §5.4）：先截开关与策略，再「修改」进存储表单
             compose.onNodeWithTag("sync-status").performScrollTo()
             screenshot("settings-sync-policy")
             compose.onNodeWithTag("sync-now").performScrollTo()
             screenshot("settings-sync-status")
+            compose.onNodeWithTag("sync-edit").performScrollTo()
+            compose.onNodeWithTag("settings-list").performTouchInput { swipeUp() }
+            compose.waitForIdle()
+            compose.onNodeWithTag("sync-edit").performClick()
             compose.onNodeWithTag("sync-backend").performScrollTo()
+            screenshot("settings-sync-s3")
+            compose.onNodeWithTag("sync-secret").performScrollTo()
+            screenshot("settings-sync-s3-credentials")
             compose.onNodeWithText(context.getString(R.string.sync_backend_webdav)).performClick()
             compose.onNodeWithTag("sync-secret").performScrollTo()
             screenshot("settings-sync-webdav")
