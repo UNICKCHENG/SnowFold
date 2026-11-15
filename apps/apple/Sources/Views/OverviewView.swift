@@ -6,6 +6,9 @@ struct OverviewView: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.dynamicTypeSize) private var typeSize
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
     @State private var contentHeight: CGFloat = 0
 
     var body: some View {
@@ -75,9 +78,11 @@ struct OverviewView: View {
             }
             Spacer(minLength: 8)
             Button(Copy.importRecoveryButton) {
-                router.tab = .settings
                 #if os(macOS)
                 router.settingsTab = .seal
+                openSettings()
+                #else
+                router.tab = .settings
                 #endif
             }
             .buttonStyle(SecondaryButtonStyle())

@@ -291,11 +291,20 @@ struct PhoneRootView: View {
     }
 }
 
-/// iOS 弹层容器：mobile-layout.md §6 的底部 sheet。
+/// iOS 弹层容器：mobile-layout.md §6 的底部 sheet；iPad 居中表单宽 540。
 struct ModalSheet: View {
     let modal: Modal
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
+        sheetContent
+            .frame(maxWidth: sizeClass == .regular ? 540 : nil)
+            .frame(maxWidth: .infinity)
+            .presentationBackground(Color.bg)
+    }
+
+    @ViewBuilder
+    private var sheetContent: some View {
         switch modal {
         case .newAsset(let code):
             AssetEditorSheet(mode: .new(categoryCode: code))

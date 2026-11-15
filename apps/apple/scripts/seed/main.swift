@@ -27,8 +27,6 @@ func shift(days: Int = 0, months: Int = 0) -> String {
 
 let core = try SnowFoldCore.open(dataDir: dataDirectory, keyStore: KeychainKeyStore())
 
-// 审计分支改动沿用：CI 临时签名可能没有钥匙串写权限；造数不依赖同步密钥，导出失败不阻断。
-
 // 主金额回归用：只有这一项资产，净资产恰为 ¥12,345,678.90。
 if arguments.contains("--hero") {
     _ = try core.createAsset(categoryCode: "cash", assetName: "招商银行朝朝宝（活期理财）家庭备用金账户", amountCents: 1_234_567_890)
@@ -131,6 +129,7 @@ for (name, cents, currency, cycle, next) in subscriptionSpecs {
 
 // 本机主题与密钥：让截图与真实使用一致。
 try core.saveTheme(theme: .system)
+// CI 临时签名可能没有钥匙串写权限；造数不依赖同步密钥，导出失败不阻断。
 _ = try? core.exportSealed()
 let overview = try core.overview(on: dayString(Date()))
 print("seeded: \(overview.totalAssetsCents) cents assets, \(overview.activeSubscriptions) active subs, \(overview.pausedSubscriptions) paused")

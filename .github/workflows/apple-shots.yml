@@ -72,8 +72,9 @@ jobs:
             "$APPLE_ROOT/scripts/seed/main.swift" \
             "$APPLE_ROOT/Generated/Swift/SnowFoldCore.swift" \
             "$APPLE_ROOT/Sources/Core/KeychainKeyStore.swift"
+          # 数据目录必须是第一个参数（核心要求绝对路径）。
           "$APPLE_ROOT/.build/sample-seed" "$APPLE_ROOT/.build/long-data-v2"
-          "$APPLE_ROOT/.build/sample-seed" --neg "$APPLE_ROOT/.build/neg-data-v1"
+          "$APPLE_ROOT/.build/sample-seed" "$APPLE_ROOT/.build/neg-data-v1" --neg
           # 坏库：非 SQLite 文件触发启动失败页
           mkdir -p "$APPLE_ROOT/.build/bad-data"
           echo "not a database" > "$APPLE_ROOT/.build/bad-data/snowfold.sqlite3"

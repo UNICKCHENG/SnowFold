@@ -263,16 +263,19 @@ struct SubscriptionsView: View {
             status: active ? "在订" : "已暂停"
         ))
 
-        if Ds.isDesktop {
-            return main
+        return Group {
+            if Ds.isDesktop {
+                main
+            } else {
+                #if os(iOS)
+                SwipeableRow(specs: mobileSwipeSpecs(record, pending: pending, active: active)) {
+                    main
+                }
+                #else
+                main
+                #endif
+            }
         }
-        #if os(iOS)
-        return SwipeableRow(specs: mobileSwipeSpecs(record, pending: pending, active: active)) {
-            main
-        }
-        #else
-        return main
-        #endif
     }
 
     /// 待确认行副标题：逾期 {n} 天 · {周期} · {日期}，整行 neg（设计稿如此）。

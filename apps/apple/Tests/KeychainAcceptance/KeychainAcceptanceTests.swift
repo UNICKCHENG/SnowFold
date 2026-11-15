@@ -20,29 +20,35 @@ final class KeychainAcceptanceTests: XCTestCase {
         let app = XCUIApplication()
         let account = "snowfold-keychain-ui-\(UUID().uuidString)"
         let baseArguments = ["-SNOWFOLD_KEYCHAIN_ACCOUNT", account]
-        #if os(macOS)
-        app.launchArguments = baseArguments + ["-SNOWFOLD_SHOT_TAB", "settings"]
-        #else
         app.launchArguments = baseArguments
-        #endif
         app.launch()
         #if os(iOS)
         let settings = app.buttons["设置"].firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 15))
         settings.tap()
+        #else
+        // Mac：设置在独立窗口（⌘,），经应用菜单打开。
+        let settingsMenu = app.menuBarItems["SnowFold"].firstMatch
+        XCTAssertTrue(settingsMenu.waitForExistence(timeout: 10))
+        settingsMenu.tap()
+        let settingsItem = app.menuItems.matching(
+            NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "设置", "Settings")
+        ).firstMatch
+        XCTAssertTrue(settingsItem.waitForExistence(timeout: 5))
+        settingsItem.tap()
         #endif
         let location = app.staticTexts["密钥存放在系统钥匙串"].firstMatch
         XCTAssertTrue(location.waitForExistence(timeout: 10))
         for _ in 0..<8 where !location.isHittable {
             #if os(macOS)
-            app.scrollViews["settings-form"].scroll(byDeltaX: 0, deltaY: -250)
+            app.swipeUp()
             #else
             app.swipeUp()
             #endif
         }
         XCTAssertTrue(location.isHittable)
         #if os(macOS)
-        XCTAssertGreaterThanOrEqual(app.windows.firstMatch.frame.width, 760)
+        XCTAssertGreaterThanOrEqual(app.windows.firstMatch.frame.width, 600)
         capture("mac-settings-keychain", app: app)
         #else
         capture("iphone16e-settings-keychain", app: app)
@@ -51,7 +57,10 @@ final class KeychainAcceptanceTests: XCTestCase {
 
         app.launchArguments = baseArguments + ["-SNOWFOLD_KEYCHAIN_FAILURE"]
         app.launch()
-        let failure = app.staticTexts["本机密钥已失效，请用恢复码恢复"].firstMatch
+        // UI 测试包不能引用宿主类型；文案取自 copy.md startup_key_unavailable 的稳定片段。
+        let failure = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "请检查密钥文件或导入恢复码")
+        ).firstMatch
         XCTAssertTrue(failure.waitForExistence(timeout: 15))
         XCTAssertTrue(failure.isHittable)
         #if os(macOS)

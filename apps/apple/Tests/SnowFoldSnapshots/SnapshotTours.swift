@@ -30,16 +30,24 @@ final class SnapshotTours: XCTestCase {
         if isTablet { XCUIDevice.shared.orientation = .landscapeLeft }
         let app = XCUIApplication()
         app.launch()
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "nav-overview")
-            .firstMatch.waitForExistence(timeout: 20), "导航入口缺失")
+        let ready = app.descendants(matching: .any).matching(identifier: "nav-overview")
+            .firstMatch.waitForExistence(timeout: 15)
+            || app.tabBars.buttons["总览"].firstMatch.waitForExistence(timeout: 5)
+        XCTAssertTrue(ready, "应用未出现导航")
         return app
     }
 
-    /// 每页一个焦点文字，用作到达断言（页标题会因页面而异，如「资产与负债」）。
+    /// 手机走标签栏按钮，平板走侧边栏标识；到达后以页面焦点文字断言。
     private func navigate(_ tab: String, app: XCUIApplication) {
+        let label = ["overview": "总览", "assets": "资产", "subscriptions": "订阅", "settings": "设置"][tab] ?? tab
         let marker = ["overview": "净资产", "assets": "总资产",
                       "subscriptions": "本月待扣", "settings": "外观"][tab] ?? tab
-        let item = app.descendants(matching: .any).matching(identifier: "nav-" + tab).firstMatch
+        let item: XCUIElement
+        if isTablet {
+            item = app.descendants(matching: .any).matching(identifier: "nav-" + tab).firstMatch
+        } else {
+            item = app.tabBars.buttons[label].firstMatch
+        }
         XCTAssertTrue(item.waitForExistence(timeout: 8), "导航入口缺失：\(tab)")
         item.tap()
         XCTAssertTrue(element(containing: marker, app: app).waitForExistence(timeout: 8),
