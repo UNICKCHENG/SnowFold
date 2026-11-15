@@ -92,7 +92,7 @@ struct SubscriptionsView: View {
         return VStack(alignment: .leading, spacing: 0) {
             if Ds.isDesktop && !typeSize.isAccessibilitySize {
                 HStack(alignment: .bottom, spacing: 40) {
-                    due
+                    due.fixedSize(horizontal: true, vertical: false)
                     spendingStat(Copy.monthlySpending, cny(totals, \.monthlyCents), usd(totals, \.monthlyCents))
                     spendingStat(Copy.annualSpending, cny(totals, \.annualCents), usd(totals, \.annualCents))
                     Spacer(minLength: 0)
@@ -184,9 +184,10 @@ struct SubscriptionsView: View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(
                 title: group.name,
-                titleColor: group.key == .overdue ? .neg : .ink,
+                titleColor: group.key == .overdue ? .neg : (Ds.isDesktop ? .text2 : .ink),
                 count: group.items.count,
-                countColor: group.key == .overdue ? .neg : .text2
+                countColor: group.key == .overdue ? .neg : .text2,
+                titleFont: Ds.isDesktop ? Ds.auxMedium() : nil
             ) {
                 EmptyView()
             }

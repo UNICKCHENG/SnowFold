@@ -44,10 +44,23 @@ extension Color {
     private static let catInvestment = Color(uiColor: .systemIndigo)
     private static let catReceivable = Color(uiColor: .systemTeal)
     #elseif canImport(AppKit)
-    /// 窗口背景
-    static let bg = Color(nsColor: .windowBackgroundColor)
-    /// 卡片、弹层（系统设置分组表单的控制面底色：浅色白卡，深色随系统控制面抬升）
-    static let cardBg = Color(nsColor: .controlBackgroundColor)
+    /// 分组页面底与卡片以系统窗口色为基准，浅色白卡、深色抬升卡片。
+    static let bg = macSurface(isCard: false)
+    static let cardBg = macSurface(isCard: true)
+
+    private static func macSurface(isCard: Bool) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            var surface = NSColor.windowBackgroundColor
+            appearance.performAsCurrentDrawingAppearance {
+                let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                let window = NSColor.windowBackgroundColor.usingColorSpace(.sRGB) ?? .windowBackgroundColor
+                // 系统窗口底在浅色下也是白色，轻叠主文字色建立分组层次。
+                let lifted = window.blended(withFraction: dark ? 0.07 : 0.04, of: .labelColor) ?? window
+                surface = dark ? (isCard ? lifted : window) : (isCard ? window : lifted)
+            }
+            return surface
+        })
+    }
     /// 分隔线、输入框描边、禁用底
     static let sep = Color(nsColor: .separatorColor)
     /// 主文字

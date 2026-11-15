@@ -330,11 +330,12 @@ struct SectionHeader<Trailing: View>: View {
     var titleColor: Color = .ink
     var count: Int? = nil
     var countColor: Color = .text2
+    var titleFont: Font? = nil
     @ViewBuilder var trailing: () -> Trailing
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title).font(Ds.sectionTitle()).foregroundStyle(titleColor)
+            Text(title).font(titleFont ?? Ds.sectionTitle()).foregroundStyle(titleColor)
             if let count {
                 Text("\(count)").font(Ds.auxMedium()).monospacedDigit().foregroundStyle(countColor)
             }
