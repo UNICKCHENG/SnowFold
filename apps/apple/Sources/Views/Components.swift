@@ -478,7 +478,7 @@ struct SwipeableRow<Content: View>: View {
     var body: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: 0) {
-                ForEach(Array(specs.enumerated()), id: \.title) { _, spec in
+                ForEach(Array(specs.enumerated()), id: \.element.title) { _, spec in
                     Button {
                         reset()
                         spec.perform()

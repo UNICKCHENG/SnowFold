@@ -209,6 +209,13 @@ struct AssetEditorSheet: View {
     @State private var selectedCategory = "cash"
 
     var body: some View {
+        editorBody
+            .onAppear(perform: prefill)
+            .sensoryFeedback(.selection, trigger: selectedCategory)
+    }
+
+    @ViewBuilder
+    private var editorBody: some View {
         #if os(macOS)
         MacDialogScaffold(
             title: mode.title,
@@ -232,8 +239,6 @@ struct AssetEditorSheet: View {
             formCard
         }
         #endif
-        .onAppear(perform: prefill)
-        .sensoryFeedback(.selection, trigger: selectedCategory)
     }
 
     private var cannotSave: Bool {
@@ -501,6 +506,12 @@ struct HistoryCorrectionSheet: View {
     @State private var errorText: String?
 
     var body: some View {
+        editorBody
+            .onAppear { amount = Fmt.decimal(history.amountCents) }
+    }
+
+    @ViewBuilder
+    private var editorBody: some View {
         #if os(macOS)
         MacDialogScaffold(
             title: Copy.correctHistoryTitle,
@@ -563,7 +574,6 @@ struct HistoryCorrectionSheet: View {
             }
         }
         #endif
-        .onAppear { amount = Fmt.decimal(history.amountCents) }
     }
 
     private var rowSeparator: some View {
@@ -625,6 +635,12 @@ struct SubscriptionEditorSheet: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        editorBody
+            .onAppear(perform: prefill)
+    }
+
+    @ViewBuilder
+    private var editorBody: some View {
         #if os(macOS)
         MacDialogScaffold(
             title: mode.title,
@@ -675,7 +691,6 @@ struct SubscriptionEditorSheet: View {
             mobileContent
         }
         #endif
-        .onAppear(perform: prefill)
     }
 
     private var cannotSave: Bool {

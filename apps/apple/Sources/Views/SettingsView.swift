@@ -634,7 +634,7 @@ final class SettingsActions: ObservableObject {
     }
 
     private func handle(_ result: Result<URL, Error>, store: SnowFoldStore,
-                        work: @escaping (URL) async throws -> Void) {
+                        work: @escaping @MainActor (URL) async throws -> Void) {
         switch result {
         case .success(let url):
             Task {
@@ -892,13 +892,20 @@ struct ThemeSegmentedPicker: View {
     @Environment(SnowFoldStore.self) private var store
     @State private var selection: ThemePreference = .system
 
+    private var themeBinding: Binding<ThemePreference> {
+        Binding<ThemePreference>(
+            get: { store.theme },
+            set: { newValue in
+                selection = newValue
+                Task { await store.saveTheme(newValue) }
+            }
+        )
+    }
+
     var body: some View {
         BrandSegmentedPicker(
-            options: [ThemePreference.system, .light, .dark],
-            selection: Binding(
-                get: { store.theme },
-                set: { selection = $0; Task { await store.saveTheme($0) } }
-            ),
+            options: [ThemePreference.system, ThemePreference.light, ThemePreference.dark],
+            selection: themeBinding,
             label: { Copy.themeLabel($0) },
             identifier: { "theme-" + String(describing: $0) }
         )

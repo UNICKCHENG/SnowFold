@@ -566,14 +566,16 @@ final class SnowFoldStore {
             pendingLocalChanges = report.pendingLocalChanges
             await reloadSyncStatus()
             if trigger == .manual {
-                showNotice(Copy.syncCompleted(report)) + (report.pendingLocalChanges ? " · " + Copy.syncPendingChanges : "")
+                showNotice(Copy.syncCompleted(report)
+                    + (report.pendingLocalChanges ? " · " + Copy.syncPendingChanges : ""))
             }
             if report.pendingLocalChanges { scheduleAfterEdit(pending: true) }
         } catch {
             await reloadSyncStatus()
             if error as? CoreError != .Conflict {
-                syncError = Copy.syncMessage(for: error)
-                if trigger == .manual { showErrorNotice(syncError) }
+                let message = Copy.syncMessage(for: error)
+                syncError = message
+                if trigger == .manual { showErrorNotice(message) }
             }
         }
         // 失败也等一个周期再重试，避免已到期的时间戳造成紧密重试。

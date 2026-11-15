@@ -470,6 +470,20 @@ struct AssetsSplitView: View {
     @Binding var scrollTo: String?
 
     var body: some View {
+        columns
+            // 自动选中首项：数据载入后且当前无选中（审计 #14 的时机缺陷在此修复）。
+            .onChange(of: store.ledger) { _, ledger in
+                if selectedAssetID == nil, let first = ledger.assets.first {
+                    selectedAssetID = first.id
+                }
+            }
+            .task {
+                if selectedAssetID == nil { selectedAssetID = store.ledger.assets.first?.id }
+            }
+    }
+
+    @ViewBuilder
+    private var columns: some View {
         #if os(macOS)
         HStack(alignment: .top, spacing: 24) {
             AssetsListView(selectedAssetID: $selectedAssetID, scrollTo: $scrollTo, selectionMode: true, showsSummary: false)
@@ -490,15 +504,6 @@ struct AssetsSplitView: View {
         .padding(.top, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         #endif
-        // 自动选中首项：数据载入后且当前无选中（审计 #14 的时机缺陷在此修复）。
-        .onChange(of: store.ledger) { _, ledger in
-            if selectedAssetID == nil, let first = ledger.assets.first {
-                selectedAssetID = first.id
-            }
-        }
-        .task {
-            if selectedAssetID == nil { selectedAssetID = store.ledger.assets.first?.id }
-        }
     }
 }
 
