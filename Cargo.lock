@@ -5880,6 +5880,7 @@ dependencies = [
  "gpui",
  "gpui-component",
  "gpui-component-assets",
+ "raw-window-handle",
  "serde_json",
  "snowfold-core",
  "tempfile",

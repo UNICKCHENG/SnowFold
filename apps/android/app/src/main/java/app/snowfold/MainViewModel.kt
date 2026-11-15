@@ -201,7 +201,7 @@ class MainViewModel(
                 core.call { it.keyFingerprint() }
             } catch (error: Throwable) {
                 if (banner == null) {
-                    banner = Banner(R.string.startup_key_unavailable, argRes = listOf(coreErrorRes(error)))
+                    banner = Banner(R.string.startup_key_unavailable)
                 }
                 null
             }
@@ -331,6 +331,13 @@ class MainViewModel(
             undoToken = ticket.token,
             validForMs = ticket.validForMs.toLong(),
         )
+    }
+
+    /** 界面按核心票据的剩余有效期收起横幅；旋转与重建不重置时限。 */
+    fun undoRemainingMs(token: String): Long {
+        val shown = _snackbar.value ?: return 0L
+        if (shown.undoToken != token) return 0L
+        return (shown.validForMs - (now() - undoReceivedAt)).coerceAtLeast(0L)
     }
 
     fun onSnackbarDismissed(token: String) {

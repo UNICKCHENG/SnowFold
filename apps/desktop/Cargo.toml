@@ -13,6 +13,7 @@ zeroize.workspace = true
 gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest", "runtime_shaders"] }
 gpui-component-assets = "=0.5.1"
 gpui-component = { version = "=0.5.1", default-features = false }
+raw-window-handle = "0.6"
 
 [dev-dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["test-support", "runtime_shaders", "windows-manifest"] }

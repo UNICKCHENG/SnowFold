@@ -137,8 +137,8 @@ cargo test --locked --workspace
 | --- | --- | --- |
 | **用户指南** | [docs/usage.md](docs/usage.md) | 数据目录、快捷键、明文/加密备份、换机恢复详细步骤 |
 | **安全设计** | [SECURITY.md](SECURITY.md) | 加密备份威胁模型、信封格式、密钥与恢复码机制 |
-| **产品与视觉** | [docs/design.md](docs/design.md) | 桌面端视觉规范与交互设计基准 |
-| | [docs/mobile-layout.md](docs/mobile-layout.md) | iOS / iPadOS / Android 窄屏与分栏布局规范 |
+| **产品与视觉** | [docs/design.md](docs/design.md) | 四端视觉规范（颜色、字体、图标、组件、桌面布局） |
+| | [docs/mobile-layout.md](docs/mobile-layout.md) | iPhone / iPad（安卓照做）的移动端布局与交互 |
 | | [docs/copy.md](docs/copy.md) | 四端统一的中文界面文案契约 |
 | | [docs/icons.md](docs/icons.md) | 图标矢量源文件与各端资源生成链 |
 | **架构与开发** | [docs/architecture.md](docs/architecture.md) | 仓库分层原则、目录规则、源码与生成产物边界 |

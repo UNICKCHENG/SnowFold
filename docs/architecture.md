@@ -31,8 +31,10 @@ SnowFold 是完全离线的个人资产与订阅台账。四端（iPhone、Mac�
 | `apps/apple/` | SwiftUI 工程，iPhone 与 Mac 共用；`scripts/` 编译内核并生成 Swift 调用代码 | — |
 | `apps/android/` | Gradle + Compose 工程；Gradle 任务编译内核并生成 Kotlin 调用代码 | — |
 | `shared/icons/app/` | 应用图标 SVG 源 | 各端图标脚本 |
-| `shared/icons/ui/` | 界面图标 SVG | 桌面端编进程序；手机端按需取用 |
-| `docs/` | 给人读的说明：本文、内核接口 `core-api.md`、开发指南 `development.md`、使用说明 `usage.md`、三端文案 `copy.md`、图标说明 `icons.md` | 开发者 |
+| `shared/icons/line/`、`shared/icons/fill/` | 界面图标 SVG（IconMCP，线条与实心两版） | 四端 |
+| `shared/fonts/inter/` | Inter 可变字体（OFL） | 安卓、桌面 |
+| `shared/design/` | 设计令牌（`tokens.css`、`tokens.json`）与设计稿源（`mock/`、`render_all.sh`） | 四端实现、设计评审 |
+| `docs/` | 给人读的说明：本文、内核接口 `core-api.md`、开发指南 `development.md`、使用说明 `usage.md`、四端文案 `copy.md`、图标说明 `icons.md` | 开发者 |
 | `.github/workflows/` | 持续集成（覆盖范围见 [development.md](development.md)） | — |
 
 根目录只放 workspace 的 `Cargo.toml`、唯一的 `Cargo.lock`、`README.md`（入口说明）、`SECURITY.md`（安全说明，GitHub 约定放根目录）。
@@ -55,4 +57,4 @@ GPUI 桌面端只发布 Windows 版；Mac 版由 `apps/apple/` 的 SwiftUI 应�
 - 改数据规则、表结构或备份格式：只改 `core/`，各端重新生成调用代码。表结构改动必须带迁移步骤。
 - 某一端专用的资源放该端目录；两端及以上会用到的资源放 `shared/`。
 - 依赖方向只有一个：`apps/` → `core/`、`apps/` → `shared/`。`core/` 不依赖任何一端。
-- 三端文案目前是 `docs/copy.md` 这份人读的表，各端照它写进自己的字符串资源。以后做成由构建自动生成各端字符串时，数据源再放进 `shared/`。
+- 四端文案目前是 `docs/copy.md` 这份人读的表，各端照它写进自己的字符串资源。以后做成由构建自动生成各端字符串时，数据源再放进 `shared/`。

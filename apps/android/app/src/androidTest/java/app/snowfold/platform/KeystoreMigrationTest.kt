@@ -208,9 +208,10 @@ class KeystoreMigrationTest {
             assertThrows(CoreException.KeyUnavailable::class.java) { core.exportRecoveryCode() }
         }
         scenario = ActivityScenario.launch(MainActivity::class.java)
-        val exact = "本机密钥已失效，请用恢复码恢复"
+        val exact = context.getString(R.string.key_unavailable_title) // 同步密钥不可用（冻结文案 key_unavailable_title）
         compose.waitUntil(10_000) { compose.onAllNodesWithText(exact).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(exact).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.startup_key_unavailable), substring = true).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.error_internal), substring = true).assertDoesNotExist()
         assertArrayEquals(ciphertext, rootEncrypted.readBytes())
         assertFalse(keyStore.containsAlias(WRAPPING_KEY_ALIAS))
@@ -252,8 +253,8 @@ class KeystoreMigrationTest {
         } else {
             compose.onNodeWithContentDescription(context.getString(R.string.cd_settings)).performClick()
         }
-        compose.onNodeWithText("密钥由系统 Keystore 保护").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.key_fingerprint_label)).performScrollTo().assertIsDisplayed()
         screenshot("settings-keystore")
-        evidence("copy settings displays exact '密钥由系统 Keystore 保护'")
+        evidence("settings shows key fingerprint row '${context.getString(R.string.key_fingerprint_label)}'")
     }
 }

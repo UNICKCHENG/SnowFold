@@ -22,7 +22,7 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 
-/** 真核心 + 真 Activity；截图样例也只调用公开核心接口，不直接写数据库。 */
+/** 真核心 + 真 Activity；截图样例只调用公开核心接口，不直接写数据库。 */
 class MobileDeliveryTest {
     @get:Rule val compose = createEmptyComposeRule()
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
@@ -68,18 +68,16 @@ class MobileDeliveryTest {
 
     private fun text(resource: Int) = context.getString(resource)
     private fun nav(route: String) { compose.onNodeWithTag("nav-$route").performClick(); compose.waitForIdle() }
-    private fun field(resource: Int) = compose.onNode(hasSetTextAction() and hasText(text(resource)))
-    private fun save() { compose.onNodeWithTag("editor-save").performClick(); compose.waitForIdle() }
     private fun shot(name: String) {
         compose.waitForIdle()
         val prefix = args.getString("capturePrefix") ?: "supplement-light"
-        val output = File(context.filesDir, "$prefix-$name.png")
+        val output = File(context.getExternalFilesDir(null)!!, "$prefix-$name.png")
         val image = instrumentation.uiAutomation.takeScreenshot()
         output.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         image.recycle()
     }
 
-    /** 每页保留原始屏幕截图，连续滚动到末尾，包含长列表中的全部分组。 */
+    /** 每页连续滚动到末尾，包含长列表中的全部分组。 */
     private fun pages(tag: String, name: String) {
         val node = compose.onNodeWithTag(tag)
         var previous = -1f
@@ -101,84 +99,89 @@ class MobileDeliveryTest {
         pages("overview-list", "01-overview")
         nav("assets")
         pages("assets-list", "02-assets")
-        compose.onNodeWithTag("assets-list").performScrollToIndex(0)
+        compose.onNodeWithTag("assets-list").performScrollToNode(hasTestTag("asset-group-0"))
         compose.onNodeWithTag("asset-$assetId").performClick()
         shot("03-asset-detail")
-        compose.onAllNodesWithText(text(R.string.correct_history))[0].performClick()
+        val currentHistory = core.data().history.last { it.assetId == assetId }.id
+        val detailScroll = if (compose.onAllNodesWithTag("asset-detail-scroll").fetchSemanticsNodes().isNotEmpty()) "asset-detail-scroll" else "assets-list"
+        compose.onNodeWithTag(detailScroll).performScrollToNode(hasTestTag("history-correct-$currentHistory"))
+        compose.onAllNodes(hasTestTag("history-correct-$currentHistory"), useUnmergedTree = true)[0].performClick()
+        compose.onNodeWithTag("editor-sheet").assertIsDisplayed()
         shot("04-correction")
         Espresso.pressBack()
         nav("subscriptions")
         pages("subscriptions-list", "05-subscriptions")
-        compose.onNodeWithTag("subscriptions-list").performScrollToIndex(0)
+        compose.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("subscription-group-0"))
         compose.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("subscription-$subscriptionId"))
         compose.onNodeWithTag("subscription-$subscriptionId").performClick()
+        compose.onNodeWithTag("editor-sheet").assertIsDisplayed()
         shot("06-subscription-editor")
-        // Phone editor is modal; on tablets the same form is embedded in the right pane.
-        if (compose.onAllNodesWithTag("editor-sheet").fetchSemanticsNodes().isNotEmpty()) Espresso.pressBack()
-        // §8 intentionally moves tablet settings from the toolbar to the sidebar.
-        if (compose.onAllNodesWithTag("nav-settings").fetchSemanticsNodes().isNotEmpty()) {
-            compose.onNodeWithTag("nav-settings").performClick()
-        } else {
-            compose.onNodeWithContentDescription(text(R.string.cd_settings)).performClick()
-        }
+        Espresso.pressBack()
+        nav("settings")
         pages("settings-list", "07-settings")
     }
 
-    @Test fun menusAndDeepLinksAndCollapsedTitles() {
-        compose.onNodeWithTag("overview-list").performTouchInput { swipeUp() }
-        shot("08-collapsed-title")
-        compose.onNodeWithTag("legend-2").performScrollTo().performClick()
+    @Test fun deepLinksAndMenus() {
+        // 总览构成行跳到资产页对应分区
+        compose.onNodeWithTag("overview-list").performScrollToNode(hasTestTag("composition-row-2"))
+        compose.onNodeWithTag("composition-row-2").performClick()
         compose.onNodeWithTag("asset-group-2").assertIsDisplayed()
         nav("overview")
-        compose.onNodeWithTag("overdue-link").performScrollTo().performClick()
+        // 「全部订阅」仍从总览进入完整列表，并保留待确认分组。
+        compose.onNodeWithText(text(R.string.all_subscriptions)).performScrollTo().performClick()
         compose.onNodeWithTag("subscription-group-0").assertIsDisplayed()
-        // Paused is expanded and the final group exists without any extra upcoming group.
+        // 已暂停分组照常展开，且没有额外的「即将扣费」分组
         compose.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("subscription-group-4"))
         compose.onNodeWithText("已暂停的健身课").assertExists()
+        // 资产长按菜单：调整余额 / 重命名 / 删除
         nav("assets")
-        compose.onNodeWithTag("assets-list").performScrollToIndex(0)
+        compose.onNodeWithTag("assets-list").performScrollToNode(hasTestTag("asset-group-0"))
         compose.onNodeWithTag("asset-$assetId").performTouchInput { longClick() }
-        compose.onNodeWithText(text(R.string.menu_rename)).performClick()
-        field(R.string.name_label).assertTextContains(longestName)
-        Espresso.pressBack()
+        compose.onNodeWithText(text(R.string.rename)).performClick()
+        compose.onNodeWithTag("rename-name").assertTextContains(longestName)
+        compose.onNodeWithTag("editor-cancel").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("editor-sheet").fetchSemanticsNodes().isEmpty() }
         nav("subscriptions")
         compose.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("subscription-$subscriptionId"))
         compose.onNodeWithTag("subscription-$subscriptionId").performTouchInput { longClick() }
         compose.onNodeWithText(text(R.string.menu_edit)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.pause)).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.menu_delete)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.delete)).assertIsDisplayed()
         shot("09-subscription-menu")
     }
 
     @Test fun correctionFailureRetainsSheetAndSuccessKeepsHistoryCount() {
         nav("assets")
         compose.onNodeWithTag("asset-$assetId").performClick()
-        compose.onAllNodesWithText(text(R.string.correct_history))[0].performClick()
+        val currentHistory = core.data().history.last { it.assetId == assetId }.id
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("history-correct-$currentHistory"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodes(hasTestTag("history-correct-$currentHistory"), useUnmergedTree = true)[0].performClick()
         val snapshots = core.data().history.size
-        field(R.string.amount_label).performTextReplacement("1..2")
-        save()
-        compose.onNodeWithText(text(R.string.correction_sheet_title)).assertIsDisplayed()
+        compose.onNodeWithTag("correct-amount").performTextReplacement("1..2")
+        compose.onNodeWithTag("editor-save").performClick()
+        compose.onNodeWithText(text(R.string.correct_history_title)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.error_validation), substring = true).assertExists()
         assertEquals(1234567890L, core.data().assets.first { it.id == assetId }.amountCents)
         shot("10-correction-error")
-        field(R.string.amount_label).performTextReplacement("12345678.91")
-        save()
-        compose.waitUntil(5_000) { compose.onAllNodesWithText(text(R.string.correction_sheet_title)).fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithTag("correct-amount").performTextReplacement("12345678.91")
+        compose.onNodeWithTag("editor-save").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("editor-sheet").fetchSemanticsNodes().isEmpty() }
         assertEquals(snapshots, core.data().history.size)
         assertEquals(1234567891L, core.data().assets.first { it.id == assetId }.amountCents)
-        compose.onNodeWithText(longestName).assertExists()
+        compose.onNode(hasText(longestName) and hasAnyAncestor(hasTestTag("asset-detail"))).assertExists()
     }
 
     @Test fun duplicateSaveAndTwoDeletesUndoOnlyLatest() {
         nav("assets")
         compose.onNodeWithTag("assets-add").performClick()
-        compose.onNodeWithTag("sheet-toggle").performClick()
-        field(R.string.name_label).performTextReplacement("连点只写一笔")
-        field(R.string.amount_label).performTextReplacement("12.34")
+        compose.onNodeWithTag("editor-sheet").assertIsDisplayed()
+        compose.onNodeWithTag("asset-name").performTextReplacement("连点只写一笔")
+        compose.onNodeWithTag("asset-amount").performTextReplacement("12.34")
         compose.onNodeWithTag("editor-save").assertIsEnabled()
         shot("11a-before-double-save")
         compose.onNodeWithTag("editor-save").performSemanticsAction(SemanticsActions.OnClick) { click -> click(); click() }
         compose.waitUntil(5_000) { core.data().assets.count { it.name == "连点只写一笔" } == 1 }
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("editor-sheet").fetchSemanticsNodes().isEmpty() }
         assertEquals(32, core.data().assets.size)
         val first = core.data().assets[1]
         val second = core.data().assets[2]
@@ -193,22 +196,28 @@ class MobileDeliveryTest {
         assertFalse(core.data().assets.any { it.id == first.id })
     }
 
-    @Test fun sheetDraftSurvivesHalfFullAndRecreation() {
+    @Test fun undoBannerExpiresWithCoreTicketWithoutRestoringDeletedAsset() {
+        nav("assets")
+        compose.onNodeWithTag("asset-$assetId").performTouchInput { swipeLeft() }
+        compose.waitUntil(5_000) { core.data().assets.none { it.id == assetId } }
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("undo-banner").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("undo-banner").assertExists()
+        compose.waitUntil(8_500) { compose.onAllNodesWithTag("undo-banner").fetchSemanticsNodes().isEmpty() }
+        assertFalse(core.data().assets.any { it.id == assetId })
+    }
+
+    @Test fun draftSurvivesRecreation() {
         nav("subscriptions")
         compose.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("subscription-$subscriptionId"))
         compose.onNodeWithTag("subscription-$subscriptionId").performClick()
-        compose.onNodeWithTag("sheet-toggle").performClick()
-        field(R.string.name_label).performTextReplacement("重建后仍在的草稿")
-        field(R.string.amount_label).performTextReplacement("9876.54")
+        compose.onNodeWithTag("editor-sheet").assertIsDisplayed()
+        compose.onNodeWithTag("sub-name").performTextReplacement("重建后仍在的草稿")
+        compose.onNodeWithTag("sub-amount").performTextReplacement("9876.54")
         Espresso.closeSoftKeyboard()
-        compose.onNodeWithTag("sheet-toggle").performClick()
-        compose.onNodeWithTag("sheet-toggle").performClick()
-        field(R.string.name_label).assertTextContains("重建后仍在的草稿")
-        // Physical rotation is driven outside instrumentation: API 37 can keep an obsolete
-        // dialog root registered with Compose's idling resource after crossing the pane boundary.
+        // Physical rotation is driven outside instrumentation; recreate covers the same state path.
         scenario.recreate()
-        field(R.string.name_label).assertTextContains("重建后仍在的草稿")
-        field(R.string.amount_label).assertTextContains("9876.54")
+        compose.onNodeWithTag("sub-name").assertTextContains("重建后仍在的草稿")
+        compose.onNodeWithTag("sub-amount").assertTextContains("9876.54")
         assertEquals("iCloud+ 200GB", core.data().subscriptions.first { it.id == subscriptionId }.name)
         shot("13-recreated-draft")
     }
@@ -217,14 +226,16 @@ class MobileDeliveryTest {
         nav("subscriptions")
         compose.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("subscription-$subscriptionId"))
         compose.onNodeWithTag("subscription-$subscriptionId").performClick()
+        compose.onNodeWithTag("editor-sheet").assertIsDisplayed()
         scenario.moveToState(Lifecycle.State.CREATED)
         core.deleteSubscription(subscriptionId)
         scenario.moveToState(Lifecycle.State.RESUMED)
         compose.waitUntil(5_000) { compose.onAllNodesWithTag("editor-sheet").fetchSemanticsNodes().isEmpty() }
         compose.onNodeWithText(text(R.string.error_not_found)).assertExists()
-        compose.onNodeWithTag("subscriptions-list").performScrollToIndex(0)
+        compose.onNodeWithTag("subscriptions-list").performScrollToNode(hasTestTag("subscription-group-0"))
         compose.onAllNodesWithText(text(R.string.mark_renewed))[0].performClick()
-        compose.onNodeWithText("已顺延 1 期").assertExists()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("已顺延 1 期", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("已顺延 1 期", useUnmergedTree = true).assertExists()
         compose.onNodeWithTag("undo-banner").assertDoesNotExist()
         shot("14-renewal-notice")
     }

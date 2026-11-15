@@ -1,24 +1,27 @@
 use super::state::{Confirm, SnowFold};
-use crate::{
-    crypto::{self, SyncKey},
-    storage::Storage,
-};
 use anyhow::{Context as _, Result, bail};
 use gpui::*;
+use snowfold_core::crypto::{self, SyncKey};
+use snowfold_core::storage::Storage;
 use snowfold_core::{SecureKeyStore, backup::Backup, keystore};
 use std::sync::Arc;
 
 impl SnowFold {
-    pub(super) fn confirm_action(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+    /// 确认框确认（无窗口上下文：从设置窗口发起时焦点留在设置窗口）。
+    pub(super) fn apply_confirm(&mut self, cx: &mut gpui::Context<Self>) {
         let Some(action) = self.confirm.clone() else {
             return;
         };
         if matches!(action, Confirm::ClearSync) {
             self.clear_sync(cx);
+            self.confirm = None;
             return;
         }
         if self.sync.busy {
-            self.error = Some(super::sync::sync_error(snowfold_core::CoreError::Conflict).into());
+            self.show_error(
+                super::sync::sync_error(snowfold_core::CoreError::Conflict).to_string(),
+                cx,
+            );
             cx.notify();
             return;
         }
@@ -64,23 +67,34 @@ impl SnowFold {
         if result.is_ok() {
             self.confirm = None;
             self.undo = None;
-            self.history = None;
             match replaced_key {
                 Some((fingerprint, true)) => {
                     self.key_fingerprint = Some(fingerprint.clone());
-                    self.notice = Some(format!(
-                        "同步密钥已替换 · 指纹 {fingerprint}（旧密钥已备份为 .bak）"
-                    ));
+                    self.notify_info(
+                        format!("同步密钥已替换 · 指纹 {fingerprint}（旧密钥已备份为 .bak）"),
+                        cx,
+                    );
                 }
                 Some((fingerprint, false)) => {
                     self.key_fingerprint = Some(fingerprint.clone());
-                    self.notice = Some(format!("同步密钥已导入 · 指纹 {fingerprint}"));
+                    self.notify_info(format!("同步密钥已导入 · 指纹 {fingerprint}"), cx);
                 }
-                None => self.notice = Some("数据已更新".into()),
+                None => self.notify_info("数据已更新", cx),
             }
         }
-        self.refresh_sync();
-        self.finish(result, window, cx);
+        let reload = result.and_then(|_| self.reload());
+        match reload {
+            Ok(()) => self.banner = None,
+            Err(e) => self.show_error(format!("操作失败：{e:#}。请检查输入或数据目录后重试。"), cx),
+        }
+        self.refresh_sync(cx);
+        cx.notify();
+    }
+    pub(super) fn confirm_action(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        self.apply_confirm(cx);
+        if self.confirm.is_none() {
+            self.focus.focus(window);
+        }
     }
     pub(super) fn export(&mut self, cx: &mut gpui::Context<Self>) {
         let json = match self
@@ -91,7 +105,7 @@ impl SnowFold {
         {
             Ok(json) => json,
             Err(e) => {
-                self.error = Some(format!("导出失败：{e:#}"));
+                self.show_error(format!("导出失败：{e:#}"), cx);
                 cx.notify();
                 return;
             }
@@ -118,11 +132,11 @@ impl SnowFold {
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(true) => {
-                        this.notice = Some("备份已导出".into());
-                        this.error = None;
+                        this.notify_info("备份已导出", cx);
+                        this.banner = None;
                     }
                     Ok(false) => {}
-                    Err(e) => this.error = Some(format!("导出失败：{e:#}")),
+                    Err(e) => this.show_error(format!("导出失败：{e:#}"), cx),
                 }
                 cx.notify();
             });
@@ -151,10 +165,10 @@ impl SnowFold {
                 match result {
                     Ok(Some(data)) => {
                         this.confirm = Some(Confirm::Import(data));
-                        this.error = None;
+                        this.banner = None;
                     }
                     Ok(None) => {}
-                    Err(e) => this.error = Some(format!("导入失败，原数据未改变：{e:#}")),
+                    Err(e) => this.show_error(format!("导入失败，原数据未改变：{e:#}"), cx),
                 }
                 cx.notify();
             });
@@ -217,7 +231,7 @@ impl SnowFold {
         let (sealed, fingerprint) = match prepared {
             Ok(value) => value,
             Err(e) => {
-                self.error = Some(e.to_string());
+                self.show_error(e.to_string(), cx);
                 cx.notify();
                 return;
             }
@@ -242,11 +256,11 @@ impl SnowFold {
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(true) => {
-                        this.notice = Some(format!("加密备份已导出 · 密钥指纹 {fingerprint}"));
-                        this.error = None;
+                        this.notify_info(format!("加密备份已导出 · 密钥指纹 {fingerprint}"), cx);
+                        this.banner = None;
                     }
                     Ok(false) => {}
-                    Err(e) => this.error = Some(format!("加密备份导出失败：{e:#}")),
+                    Err(e) => this.show_error(format!("加密备份导出失败：{e:#}"), cx),
                 }
                 cx.notify();
             });
@@ -258,7 +272,7 @@ impl SnowFold {
         let key = match self.load_key() {
             Ok(key) => key,
             Err(e) => {
-                self.error = Some(e.to_string());
+                self.show_error(e.to_string(), cx);
                 cx.notify();
                 return;
             }
@@ -284,10 +298,10 @@ impl SnowFold {
                 match result {
                     Ok(Some((bytes, info))) => {
                         this.confirm = Some(Confirm::ImportSealed { bytes, info });
-                        this.error = None;
+                        this.banner = None;
                     }
                     Ok(None) => {}
-                    Err(e) => this.error = Some(format!("加密备份导入失败，原数据未改变：{e:#}")),
+                    Err(e) => this.show_error(format!("加密备份导入失败，原数据未改变：{e:#}"), cx),
                 }
                 cx.notify();
             });
@@ -305,7 +319,7 @@ impl SnowFold {
         let (contents, fingerprint) = match prepared {
             Ok(value) => value,
             Err(e) => {
-                self.error = Some(e.to_string());
+                self.show_error(e.to_string(), cx);
                 cx.notify();
                 return;
             }
@@ -331,13 +345,13 @@ impl SnowFold {
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(true) => {
-                        this.notice = Some(format!("恢复码已导出 · 密钥指纹 {fingerprint}"));
+                        this.notify_info(format!("恢复码已导出 · 密钥指纹 {fingerprint}"), cx);
                         this.key_fingerprint = Some(fingerprint.clone());
-                        this.refresh_sync();
-                        this.error = None;
+                        this.refresh_sync(cx);
+                        this.banner = None;
                     }
                     Ok(false) => {}
-                    Err(e) => this.error = Some(format!("恢复码导出失败：{e:#}")),
+                    Err(e) => this.show_error(format!("恢复码导出失败：{e:#}"), cx),
                 }
                 cx.notify();
             });
@@ -354,7 +368,7 @@ impl SnowFold {
         }) {
             Ok(fingerprint) => fingerprint,
             Err(e) => {
-                self.error = Some(format!("恢复码导入失败：{e:#}"));
+                self.show_error(format!("恢复码导入失败：{e:#}"), cx);
                 cx.notify();
                 return;
             }
@@ -384,10 +398,10 @@ impl SnowFold {
                             new_fingerprint,
                             old_fingerprint: old_fingerprint.clone(),
                         });
-                        this.error = None;
+                        this.banner = None;
                     }
                     Ok(None) => {}
-                    Err(e) => this.error = Some(format!("恢复码导入失败，本机密钥未改变：{e:#}")),
+                    Err(e) => this.show_error(format!("恢复码导入失败，本机密钥未改变：{e:#}"), cx),
                 }
                 cx.notify();
             });

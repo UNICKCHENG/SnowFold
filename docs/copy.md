@@ -1,4 +1,4 @@
-# SnowFold 三端共用中文文案
+# SnowFold 四端共用中文文案
 
 状态：**冻结，之后修改只经用户**。适用于 SwiftUI（iPhone/Mac）、Compose（Android）、GPUI（Windows）三种宿主。
 
@@ -122,19 +122,18 @@
 | confirm_overwrite | 确认覆盖 | JSON/密封包导入及现有清空弹层 |
 | confirm_replace_key | 确认替换 | 恢复码确认 |
 
-清空弹层的提交按钮沿用「确认覆盖」。
+清空弹层的提交按钮用 `clear_confirm`「清空」；导入覆盖类弹层仍用「确认覆盖」。
 
 ## 空状态与设置说明
 
 | key | 中文文案 | 用途 |
 | --- | --- | --- |
-| no_asset_records | 还没有记录，点击右侧「添加」记下第一笔 | 分类空状态 |
 | composition_empty | 暂无资产 | 总览资产构成图空状态（移动端） |
 | no_subscriptions | 还没有订阅 | 订阅空标题 |
 | no_subscriptions_help | 记下常用服务，随时知道接下来要扣多少钱 | 订阅空说明 |
 | no_charges | 暂无扣费 | 无 active 订阅或下一个扣费 |
-| no_upcoming_charges | 未来 30 天没有待扣费用 | 总览空状态 |
-| theme_help | 跟随系统会自动匹配电脑的深浅色。 | 原设置说明 |
+| no_upcoming_charges | 未来 30 天没有扣费 | 总览空状态 |
+| theme_help | 「自动」会跟随系统的深浅色。 | 设置 · 外观说明 |
 | export_backup_title | 导出备份 | JSON 设置行 |
 | export_backup_help | 保存为 JSON 文件，可随时导入恢复。 | JSON 设置说明 |
 | import_backup_title | 导入备份 | JSON 设置行 |
@@ -149,7 +148,6 @@
 | recovery_code_title | 同步密钥恢复码 | 恢复码设置行 |
 | recovery_code_help | 换机或重装后恢复加密备份；请离线保存，不要放云盘同步目录。 | 恢复码说明 |
 
-“右侧”“电脑”沿用桌面来源文案。手机的控件位置与系统用语若需调整，须经用户修改本冻结表，不在实现中自行改字。
 
 ## 确认弹层与系统文件选择
 
@@ -181,7 +179,7 @@
 | key_replaced | 同步密钥已替换 · 指纹 {fingerprint}（旧密钥已备份为 .bak） | 替换密钥 |
 | subscription_renewed | 已顺延 {periods} 期 | 续费成功 |
 | startup_backup_failed | 启动备份失败：{detail}。原数据未改变，请检查数据目录权限。 | 桌面端启动备份错误 |
-| startup_key_unavailable | 同步密钥不可用：{detail}。加密备份暂时无法导出或导入；可以在设置里导入恢复码，或处理密钥文件后重启。 | 桌面端启动密钥错误 |
+| startup_key_unavailable | 请检查密钥文件或导入恢复码。加密备份暂时无法导出或导入；可以在设置里导入恢复码，或处理密钥文件后重启。 | 密钥不可用卡片正文（标题用 key_unavailable_title；不再拼 {detail}，避免「同步密钥不可用」重复） |
 | local_data_unreadable | 无法读取本机数据：{detail}。请检查数据目录权限后重新打开。 | 启动数据库错误 |
 | database_unavailable | 数据库不可用 | 桌面上下文错误 |
 | operation_failed | 操作失败：{detail}。请检查输入或数据目录后重试。 | 通用操作错误 |
@@ -328,3 +326,53 @@
 | recovery_file_fingerprint | # 密钥指纹：{fingerprint} | 注释指纹行 |
 | recovery_file_warning | # 任何拿到这个文件的人都能解密你的加密备份；请离线保存，不要上传网盘或发给别人。 | 明文密钥说明 |
 | recovery_file_instructions | # 换机或重装后，在「设置 · 加密备份 · 导入恢复码」中选择本文件即可。 | 恢复入口说明 |
+
+## 界面重做新增（2026-11）
+
+### 空状态
+
+| key | 中文文案 | 用途 | 与现行的关系 |
+| --- | --- | --- | --- |
+| overview_empty_title | 还没有记录 | 总览空状态标题 | 新增 |
+| overview_empty_help | 记下第一笔资产，净资产会显示在这里 | 总览空状态说明 | 新增 |
+| add_asset | 添加资产 | 空状态按钮、工具栏「＋」读屏名、弹层标题 | 新增 |
+| assets_empty_title | 还没有资产 | 资产空状态标题 | 新增 |
+| assets_empty_help | 现金、房产、投资、借出和欠款都可以记 | 资产空状态说明 | 新增 |
+| category_empty | 暂无{category} | 分类空状态 | 取代 no_asset_records |
+
+订阅空状态沿用 no_subscriptions、no_subscriptions_help；按钮沿用 new_subscription（图标改用 plus 图标，文字为「新建订阅」）。
+
+### 新布局必需
+
+| key | 中文文案 | 用途 |
+| --- | --- | --- |
+| adjust_balance | 调整余额 | 资产详情主按钮、弹层标题 |
+| rename | 重命名 | 资产详情按钮 |
+| delete | 删除 | 资产详情、订阅编辑、左滑动作 |
+| delete_subscription | 删除订阅 | 移动编辑 sheet |
+| correct_history_title | 修正历史 | 弹层标题 |
+| edit_subscription_title | 编辑订阅 | 弹层标题 |
+| category_label | 分类 | 添加资产字段 |
+| asset_label | 资产 | 调整余额只读字段 |
+| current_balance_label | 当前余额 | 调整余额只读字段 |
+| new_balance_label | 新余额 | 调整余额字段 |
+| history_time_label | 记录时间 | 修正历史只读字段 |
+| original_amount_label | 原金额 | 修正历史只读字段 |
+| corrected_amount_label | 修正为 | 修正历史字段 |
+| history_section | 变动记录 | 资产详情分区标题（与 history_title 同义，拆成标题 + 说明） |
+| history_note | 修正不会新增快照 | 分区说明、修正弹层说明 |
+| asset_meta | 更新于 {date} · 历史 {count} 条 | 资产详情副标题 |
+| records_label | 记录 | 资产概览「记录 {count} 项」的标签 |
+| asset_name_placeholder | 例如：招商银行 储蓄卡 | 名称占位符 |
+| subscription_name_placeholder | 例如：Netflix | 订阅名称占位符 |
+| choose_date_placeholder | 选择日期 | 日期字段占位符 |
+| settings_tab_general | 通用 | 设置窗口页签（需求 5.1） |
+| settings_tab_data | 数据 | 同上（与 data_section 同字） |
+| settings_tab_security_sync | 加密与同步 | 同上 |
+| settings_tab_about | 关于 | 同上（与 about_section 同字） |
+| sync_storage_label | 存储 | 同步已配置时的存储行 |
+| sync_edit_config | 修改 | 存储行按钮 |
+| startup_error_title | 无法打开数据 | 启动失败错误页标题 |
+| key_unavailable_title | 同步密钥不可用 | 密钥不可用卡片标题 |
+| more_currency | + {amount} | 人民币下方的美元金额行（只有符号，不含汉字） |
+| clear_confirm | 清空 | 清空全部数据弹层的提交按钮 |

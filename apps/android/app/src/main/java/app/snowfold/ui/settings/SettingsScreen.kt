@@ -1,55 +1,119 @@
 package app.snowfold.ui.settings
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import app.snowfold.MainViewModel
-import app.snowfold.R
-import app.snowfold.ui.components.AppCard
-import app.snowfold.ui.components.SettingRow
-import app.snowfold.ui.components.SnowFoldSegmented
-import app.snowfold.ui.components.appColors
-import app.snowfold.ui.model.UiLedger
-import app.snowfold.ui.theme.DesignTokens
-import app.snowfold.ui.theme.SnowFoldType
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.snowfold.MainViewModel
+import app.snowfold.R
+import app.snowfold.ui.components.RowDivider
+import app.snowfold.ui.components.SfCard
+import app.snowfold.ui.components.SfSegmented
+import app.snowfold.ui.theme.DesignTokens
+import app.snowfold.ui.theme.SnowFoldType
+import app.snowfold.ui.theme.appColors
+import app.snowfold.ui.theme.appType
 import kotlinx.coroutines.launch
 
-/** 设置页（docs/design.md §6）：外观 / 数据 / 加密备份 / 关于，行内说明 + 分段主题。 */
+/** 设置行：标题正文 + 说明辅助 text2；可点行右侧 chevron。 */
+@Composable
+private fun SettingsRow(
+    title: String,
+    help: String?,
+    onClick: (() -> Unit)? = null,
+    danger: Boolean = false,
+    trailing: (@Composable () -> Unit)? = null,
+    testTag: String? = null,
+) {
+    val colors = appColors()
+    Column {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = DesignTokens.rowHeight)
+                .then(
+                    if (onClick != null) {
+                        Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onClick,
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(horizontal = DesignTokens.pageMargin, vertical = DesignTokens.space3)
+                .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = SnowFoldType.body.appType(),
+                    color = if (danger) colors.neg else colors.text,
+                )
+                if (help != null) {
+                    Text(
+                        help,
+                        style = SnowFoldType.caption.appType(),
+                        color = colors.text2,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+            if (trailing != null) trailing()
+            if (onClick != null && trailing == null && !danger) {
+                Icon(AppIcon0.chevronRight, contentDescription = null, tint = colors.text2, modifier = Modifier.padding(start = 8.dp).height(16.dp).width(16.dp))
+            }
+        }
+    }
+}
+
+private object AppIcon0 {
+    val chevronRight get() = app.snowfold.ui.components.AppIcon.chevronRight
+}
+
+/** 设置页（mobile-layout §5）：外观 / 数据 / 加密备份 / 同步 / 关于，单列分组卡片。 */
 @Composable
 fun SettingsScreen(
     vm: MainViewModel,
-    onBack: () -> Unit,
-    showClose: Boolean = true,
+    tablet: Boolean = false,
     modifier: Modifier = Modifier,
+    importRecoveryOnOpen: Boolean = false,
 ) {
-    val tokens = appColors()
+    val colors = appColors()
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboard = LocalClipboardManager.current
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
     var pendingJson by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
     var pendingSealed by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<ByteArray?>(null) }
     var pendingSealedFingerprint by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
@@ -74,10 +138,7 @@ fun SettingsScreen(
         scope.launch {
             val ok = uri != null && payload != null && app.snowfold.platform.SafIo.writeBytes(context, uri, payload)
             if (ok) {
-                vm.notifyExportComplete(
-                    R.string.sealed_backup_exported,
-                    args = listOf(fingerprint ?: ""),
-                )
+                vm.notifyExportComplete(R.string.sealed_backup_exported, args = listOf(fingerprint ?: ""))
                 vm.refreshFingerprintInState(fingerprint)
             } else {
                 vm.notifyExportFailed(templateRes = R.string.sealed_export_failed)
@@ -93,10 +154,7 @@ fun SettingsScreen(
         scope.launch {
             val ok = uri != null && payload != null && app.snowfold.platform.SafIo.writeText(context, uri, payload)
             if (ok) {
-                vm.notifyExportComplete(
-                    R.string.recovery_code_exported,
-                    args = listOf(fingerprint ?: ""),
-                )
+                vm.notifyExportComplete(R.string.recovery_code_exported, args = listOf(fingerprint ?: ""))
             } else {
                 vm.notifyExportFailed(templateRes = R.string.recovery_export_failed)
             }
@@ -128,6 +186,13 @@ fun SettingsScreen(
             if (text == null) vm.notifyImportReadFailed() else vm.prepareReplaceKey(text)
         }
     }
+    var recoveryPickerOpened by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(importRecoveryOnOpen) {
+        if (importRecoveryOnOpen && !recoveryPickerOpened) {
+            recoveryPickerOpened = true
+            importRecoveryLauncher.launch(arrayOf("text/plain", "*/*"))
+        }
+    }
     val exportRecovery: () -> Unit = {
         scope.launch {
             runCatching { vm.exportRecoveryCodeWithFingerprint() }
@@ -136,39 +201,38 @@ fun SettingsScreen(
                     pendingRecoveryFingerprint = fingerprint
                     exportRecoveryLauncher.launch("snowfold-recovery-code.txt")
                 }
-                .onFailure { vm.notifyExportFailed(detailRes = app.snowfold.data.coreErrorRes(it), templateRes = R.string.recovery_export_failed) }
+                .onFailure {
+                    vm.notifyExportFailed(
+                        detailRes = app.snowfold.data.coreErrorRes(it),
+                        templateRes = R.string.recovery_export_failed,
+                    )
+                }
         }
     }
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag("settings-list").verticalScroll(rememberScrollState())
-            .padding(
-                start = DesignTokens.pageMargin,
-                end = DesignTokens.pageMargin,
-                top = DesignTokens.space3,
-                bottom = DesignTokens.space4 + 48.dp,
-            ),
-        verticalArrangement = Arrangement.spacedBy(DesignTokens.space3),
-    ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (showClose) {
-                TextButton(onClick = onBack) {
-                    Text(stringResource(R.string.close), style = SnowFoldType.body, color = tokens.accent)
-                }
-            }
-            Text(stringResource(R.string.settings_title), style = SnowFoldType.statValue, color = tokens.ink, modifier = Modifier.weight(1f).padding(start = 4.dp))
-            if (!showClose) app.snowfold.ui.components.SyncButton(vm)
-        }
-        val state by vm.state.collectAsStateWithLifecycle()
-        val theme = (state as? app.snowfold.AppState.Ready)?.theme
-        val fingerprint = (state as? app.snowfold.AppState.Ready)?.keyFingerprint
 
-        Text(stringResource(R.string.appearance_section), style = SnowFoldType.sectionHeader, color = tokens.ink2)
-        AppCard {
-            Column(Modifier.padding(16.dp)) {
-                Text(stringResource(R.string.theme_label), style = SnowFoldType.body, color = tokens.ink)
-                SnowFoldSegmented(
+    val state by vm.state.collectAsStateWithLifecycle()
+    val theme = (state as? app.snowfold.AppState.Ready)?.theme
+    val fingerprint = (state as? app.snowfold.AppState.Ready)?.keyFingerprint
+    val copyLabel = stringResource(R.string.cd_copy)
+
+    val contentWidth = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+    val maxWidth = if (tablet) 720.dp else contentWidth
+
+    Box(modifier, contentAlignment = Alignment.TopCenter) {
+    Column(
+        Modifier.widthIn(max = maxWidth).fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .testTag("settings-list")
+            .padding(horizontal = if (tablet) 0.dp else DesignTokens.pageMargin)
+            .padding(bottom = if (tablet) DesignTokens.space8 else DesignTokens.phoneContentBottom),
+    ) {
+        // 外观
+        sectionHeader(stringResource(R.string.appearance_section))
+        SfCard {
+            Column(Modifier.fillMaxWidth().padding(horizontal = DesignTokens.pageMargin, vertical = DesignTokens.space3)) {
+                Text(stringResource(R.string.theme_label), style = SnowFoldType.body.appType(), color = colors.text)
+                Spacer(Modifier.height(DesignTokens.space2))
+                SfSegmented(
                     options = listOf(
                         stringResource(R.string.theme_system),
                         stringResource(R.string.theme_light),
@@ -187,127 +251,157 @@ fun SettingsScreen(
                         }
                         vm.setTheme(pref)
                     },
-                    modifier = Modifier.padding(top = 8.dp),
+                    testTag = "theme-segmented",
                 )
                 Text(
                     stringResource(R.string.theme_help),
-                    style = SnowFoldType.helper,
-                    color = tokens.ink3,
-                    modifier = Modifier.padding(top = 8.dp),
+                    style = SnowFoldType.caption.appType(),
+                    color = colors.text2,
+                    modifier = Modifier.padding(top = DesignTokens.space2),
                 )
             }
         }
+        Spacer(Modifier.height(DesignTokens.space4))
 
-        Text(stringResource(R.string.backups_section), style = SnowFoldType.sectionHeader, color = tokens.ink2)
-        AppCard {
-            Column {
-                SettingRow(
-                    title = stringResource(R.string.export_backup_title),
-                    help = stringResource(R.string.export_backup_help),
-                    onClick = {
-                        scope.launch {
-                            runCatching { vm.exportJsonPayload() }
-                                .onSuccess { pendingJson = it; exportJsonLauncher.launch("snowfold-backup.json") }
-                                .onFailure { vm.notifyExportFailed(detailRes = app.snowfold.data.coreErrorRes(it)) }
-                        }
-                    },
-                )
-                SettingRow(
-                    title = stringResource(R.string.import_backup_title),
-                    help = stringResource(R.string.import_backup_help),
-                    onClick = { importJsonLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
-                )
-                SettingRow(
-                    title = stringResource(R.string.export_sealed),
-                    help = stringResource(R.string.encrypted_backup_help),
-                    onClick = {
-                        scope.launch {
-                            runCatching { vm.exportSealedWithFingerprint() }
-                                .onSuccess { (bytes, fingerprint) ->
-                                    pendingSealed = bytes
-                                    pendingSealedFingerprint = fingerprint
-                                    exportSealedLauncher.launch("snowfold-backup.sfseal")
-                                }
-                                .onFailure { vm.notifyExportFailed(detailRes = app.snowfold.data.coreErrorRes(it), templateRes = R.string.sealed_export_failed) }
-                        }
-                    },
-                )
-                SettingRow(
-                    title = stringResource(R.string.import_sealed),
-                    help = stringResource(R.string.restore_encrypted_backup_help),
-                    onClick = { importSealedLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
-                )
-            }
+        // 数据
+        sectionHeader(stringResource(R.string.data_section))
+        SfCard {
+            SettingsRow(
+                title = stringResource(R.string.export_backup_title),
+                help = stringResource(R.string.export_backup_help),
+                onClick = {
+                    scope.launch {
+                        runCatching { vm.exportJsonPayload() }
+                            .onSuccess { pendingJson = it; exportJsonLauncher.launch("snowfold-backup.json") }
+                            .onFailure { vm.notifyExportFailed(detailRes = app.snowfold.data.coreErrorRes(it)) }
+                    }
+                },
+            )
+            RowDivider(startInset = DesignTokens.pageMargin)
+            SettingsRow(
+                title = stringResource(R.string.import_backup_title),
+                help = stringResource(R.string.import_backup_help),
+                onClick = { importJsonLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
+            )
+            RowDivider(startInset = DesignTokens.pageMargin)
+            SettingsRow(
+                title = stringResource(R.string.clear_all_title),
+                help = stringResource(R.string.clear_all_help),
+                onClick = vm::requestClearData,
+                danger = true,
+            )
         }
+        Spacer(Modifier.height(DesignTokens.space4))
 
-        Text(stringResource(R.string.key_section), style = SnowFoldType.sectionHeader, color = tokens.ink2)
-        AppCard {
-            Column {
-            Column(
+        // 加密备份
+        sectionHeader(stringResource(R.string.encrypted_backup_section))
+        SfCard {
+            SettingsRow(
+                title = stringResource(R.string.encrypted_backup_section),
+                help = stringResource(R.string.encrypted_backup_help),
+                onClick = {
+                    scope.launch {
+                        runCatching { vm.exportSealedWithFingerprint() }
+                            .onSuccess { (bytes, fingerprint) ->
+                                pendingSealed = bytes
+                                pendingSealedFingerprint = fingerprint
+                                exportSealedLauncher.launch("snowfold-backup.sfseal")
+                            }
+                            .onFailure {
+                                vm.notifyExportFailed(
+                                    detailRes = app.snowfold.data.coreErrorRes(it),
+                                    templateRes = R.string.sealed_export_failed,
+                                )
+                            }
+                    }
+                },
+            )
+            RowDivider(startInset = DesignTokens.pageMargin)
+            SettingsRow(
+                title = stringResource(R.string.restore_encrypted_backup_title),
+                help = stringResource(R.string.restore_encrypted_backup_help),
+                onClick = { importSealedLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
+            )
+            RowDivider(startInset = DesignTokens.pageMargin)
+            // 同步密钥指纹：右侧等宽 text2；长按复制 + 读屏自定义动作（§6.1）
+            Row(
                 Modifier
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .fillMaxWidth()
+                    .heightIn(min = DesignTokens.rowHeight)
+                    .testTag("key-fingerprint")
                     .pointerInput(fingerprint) {
                         detectTapGestures(onLongPress = {
-                            fingerprint?.let { clipboard.setText(AnnotatedString(it)) }
+                            fingerprint?.let { value ->
+                                clipboard.setText(AnnotatedString(value))
+                            }
                         })
-                    },
+                    }
+                    .semantics {
+                        customActions = listOf(
+                            androidx.compose.ui.semantics.CustomAccessibilityAction(copyLabel) {
+                                fingerprint?.let { clipboard.setText(AnnotatedString(it)) }
+                                fingerprint != null
+                            },
+                        )
+                    }
+                    .padding(horizontal = DesignTokens.pageMargin, vertical = DesignTokens.space3),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    stringResource(R.string.key_fingerprint_label),
-                    style = SnowFoldType.helper,
-                    color = tokens.ink2,
-                )
-                Text(
-                    fingerprint ?: stringResource(R.string.key_not_generated),
-                    style = SnowFoldType.helper.copy(fontFamily = FontFamily.Monospace),
-                    color = tokens.ink3,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-                Text(stringResource(R.string.key_storage_location), style = SnowFoldType.helper, color = tokens.ink3)
-            }
-            Column {
-                SettingRow(
-                    title = stringResource(R.string.export_recovery_code),
-                    help = stringResource(R.string.recovery_code_help),
-                    onClick = exportRecovery,
-                )
-                SettingRow(
-                    title = stringResource(R.string.import_recovery_code),
-                    help = null,
-                    onClick = { importRecoveryLauncher.launch(arrayOf("text/plain", "*/*")) },
+                app.snowfold.ui.components.ValueRow(
+                    leading = { Text(stringResource(R.string.key_fingerprint_label), style = SnowFoldType.body.appType(), color = colors.text) },
+                    trailing = { Text(fingerprint ?: stringResource(R.string.key_not_generated), style = SnowFoldType.caption.appType(), color = colors.text2) },
                 )
             }
+            RowDivider(startInset = DesignTokens.pageMargin)
+            SettingsRow(
+                title = stringResource(R.string.recovery_code_title),
+                help = stringResource(R.string.recovery_code_help),
+                onClick = null,
+            )
+            RowDivider(startInset = DesignTokens.pageMargin)
+            SettingsRow(
+                title = stringResource(R.string.export_recovery_code),
+                help = null,
+                onClick = exportRecovery,
+            )
+            RowDivider(startInset = DesignTokens.pageMargin)
+            SettingsRow(
+                title = stringResource(R.string.import_recovery_code),
+                help = null,
+                onClick = {
+                    importRecoveryLauncher.launch(arrayOf("text/plain", "*/*"))
+                },
+            )
         }
-        }
+        Spacer(Modifier.height(DesignTokens.space4))
 
-        Text(stringResource(R.string.data_section), style = SnowFoldType.sectionHeader, color = tokens.ink2)
-        AppCard {
-            Column {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    Text(stringResource(R.string.data_location_title), style = SnowFoldType.body, color = tokens.ink)
-                    Text(context.filesDir.resolve("snowfold.sqlite3").absolutePath, style = SnowFoldType.helper, color = tokens.ink3)
-                }
-                SettingRow(
-                    title = stringResource(R.string.clear_all_title),
-                    help = stringResource(R.string.clear_all_help),
-                    onClick = vm::requestClearData,
-                    danger = true,
-                )
-            }
-        }
-
+        // 同步
         SyncSettings(vm, onExportRecovery = exportRecovery)
+        Spacer(Modifier.height(DesignTokens.space4))
 
-        AppCard {
-            Column(Modifier.padding(16.dp)) {
-                Text(stringResource(R.string.app_version), style = SnowFoldType.body, color = tokens.ink)
+        // 关于
+        sectionHeader(stringResource(R.string.about_section))
+        SfCard {
+            Column(Modifier.fillMaxWidth().padding(horizontal = DesignTokens.pageMargin, vertical = DesignTokens.space3)) {
+                Text(stringResource(R.string.app_version), style = SnowFoldType.body.appType(), color = colors.text)
                 Text(
                     stringResource(R.string.offline_description),
-                    style = SnowFoldType.helper,
-                    color = tokens.ink2,
-                    modifier = Modifier.padding(top = 4.dp),
+                    style = SnowFoldType.caption.appType(),
+                    color = colors.text2,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
             }
         }
     }
+    }
+}
+
+@Composable
+private fun sectionHeader(title: String) {
+    Text(
+        title,
+        style = SnowFoldType.captionMedium.appType(),
+        color = appColors().text2,
+        modifier = Modifier.padding(start = 4.dp, top = 0.dp, bottom = DesignTokens.space2),
+    )
 }

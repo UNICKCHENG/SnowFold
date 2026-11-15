@@ -127,8 +127,11 @@ data class HeroUi(
 
 data class SubscriptionStatUi(
     val dueThisMonthText: String,
+    val dueThisMonthUsdText: String?,
     val monthlyText: String,
+    val monthlyUsdText: String?,
     val annualText: String,
+    val annualUsdText: String?,
 )
 
 data class NextChargeUi(
@@ -140,26 +143,8 @@ data class NextChargeUi(
  * Immutable read model produced entirely on the core worker: every money string
  * is formatted by the core, so the UI thread never calls across FFI.
  */
-enum class DayKind { Overdue, Today, Future }
-
-/** 30 天时间轴的日期刻度（docs/design.md §5.3，MM-dd）。 */
-data class TimelineTick(
-    val index: Int,
-    val label: String,
-)
-
-data class TimelineDayUi(
-    val date: LocalDate,
-    val cents: Long,
-    val kind: DayKind,
-)
-
 data class UiLedger(
     val today: LocalDate,
-    /** 未来扣费时间线：30 天逐日 CNY 合计（含左端逾期日）。 */
-    val timeline: List<TimelineDayUi>,
-    /** X 轴日期刻度 MM-dd，3–4 个。 */
-    val timelineTicks: List<String>,
     val assets: List<AssetUi>,
     val assetCount: Int,
     val categories: List<CategoryUi>,
@@ -171,11 +156,7 @@ data class UiLedger(
     val upcoming: List<UpcomingUi>,
     /** True when overview overflowed; hero/stats show 超出范围 placeholders. */
     val overflow: Boolean,
-) {
-    /** §5.1 环形图数据：cash→receivable 四类金额，负债不计入环。 */
-    val donutAmounts: List<Long>
-        get() = categories.take(4).map { it.amountCents }
-}
+)
 
 private fun LedgerGateway.money(cents: Long): String = formatMoney(cents, "CNY")
 
@@ -215,11 +196,13 @@ fun LedgerGateway.toUiLedger(
                 isCurrent = position == 0,
             )
         }
+        val isDebt = asset.categoryCode == "debt"
         AssetUi(
             id = asset.id,
             categoryIndex = CATEGORY_CODES.indexOf(asset.categoryCode).coerceAtLeast(0),
             name = asset.name,
-            amountText = formatMoney(asset.amountCents, "CNY"),
+            // 负债资产按负数显示；amountPlain 保持正数供编辑预填。
+            amountText = formatMoney(if (isDebt) -asset.amountCents else asset.amountCents, "CNY"),
             amountPlain = plainAmount(asset.amountCents),
             history = rows,
             updatedOn = runCatching { java.time.LocalDate.parse(asset.updatedAt.substringBefore('T')) }.getOrNull(),
@@ -234,14 +217,16 @@ fun LedgerGateway.toUiLedger(
         } else {
             share
         }
+        val formattedShare = String.format(Locale.ROOT, "%.1f%%", share)
         CategoryUi(
             index = index,
             labelRes = categoryLabelRes(c.code),
-            amountText = money(c.amountCents),
+            // 负债按负数显示（−¥，design.md §1/§9.2）；底层金额仍为正数。
+            amountText = money(if (c.isLiability) -c.amountCents else c.amountCents),
             amountCents = c.amountCents,
             count = c.count.toInt(),
             barFraction = (bar / 100f).coerceIn(0f, 1f),
-            sharePercentText = String.format(Locale.ROOT, "%.1f%%", share),
+            sharePercentText = if (share > 0f && formattedShare == "0.0%") "<0.1%" else formattedShare,
             isLiability = c.isLiability,
         )
     } ?: CATEGORY_CODES.map { code ->
@@ -271,18 +256,21 @@ fun LedgerGateway.toUiLedger(
             groupOrdinal = group,
             overdueDays = overdueDays,
             active = s.status == "active",
-            initial = s.name.firstOrNull()?.uppercase() ?: "?",
+            initial = s.name.firstOrNull()?.toString() ?: "?",
         )
     }
 
     val hero = overview?.let {
         val ratio = it.totalAssetsCents.takeIf { v -> v > 0 }
-            ?.let { v -> String.format(Locale.ROOT, "%.1f%%", it.totalDebtCents.toDouble() / v.toDouble() * 100.0) }
+            ?.let { v ->
+                val formatted = String.format(Locale.ROOT, "%.1f%%", it.totalDebtCents.toDouble() / v.toDouble() * 100.0)
+                if (it.totalDebtCents > 0 && formatted == "0.0%") "<0.1%" else formatted
+            }
         HeroUi(
             netText = money(it.netAssetsCents),
             netNegative = it.netAssetsCents < 0,
             assetsText = money(it.totalAssetsCents),
-            debtText = money(it.totalDebtCents),
+            debtText = money(-it.totalDebtCents),
             ratioText = ratio,
         )
     }
@@ -290,9 +278,12 @@ fun LedgerGateway.toUiLedger(
         val cny = it.subscriptionTotals.firstOrNull { t -> t.currency == "CNY" }
         val usd = it.subscriptionTotals.firstOrNull { t -> t.currency == "USD" }
         SubscriptionStatUi(
-            dueThisMonthText = "${money(cny?.dueThisMonthCents ?: 0)} / ${formatMoney(usd?.dueThisMonthCents ?: 0, "USD")}",
-            monthlyText = "${money(cny?.monthlyCents ?: 0)} / ${formatMoney(usd?.monthlyCents ?: 0, "USD")}",
-            annualText = "${money(cny?.annualCents ?: 0)} / ${formatMoney(usd?.annualCents ?: 0, "USD")}",
+            dueThisMonthText = money(cny?.dueThisMonthCents ?: 0),
+            dueThisMonthUsdText = usd?.takeIf { t -> t.dueThisMonthCents != 0L }?.let { t -> formatMoney(t.dueThisMonthCents, "USD") },
+            monthlyText = money(cny?.monthlyCents ?: 0),
+            monthlyUsdText = usd?.takeIf { t -> t.monthlyCents != 0L }?.let { t -> formatMoney(t.monthlyCents, "USD") },
+            annualText = money(cny?.annualCents ?: 0),
+            annualUsdText = usd?.takeIf { t -> t.annualCents != 0L }?.let { t -> formatMoney(t.annualCents, "USD") },
         )
     }
 
@@ -331,38 +322,8 @@ fun LedgerGateway.toUiLedger(
         )
     }
 
-    // 时间线窗口：30 列，从最早逾期日（最多回看 7 天）或今天开始。
-    val activeCny = data.subscriptions.filter { it.status == "active" && it.currency == "CNY" }
-    val windowStart = activeCny.map { it.nextChargeOn.toLocalDate() }
-        .filter { it < today }
-        .minOrNull()
-        ?.coerceAtLeast(today.minusDays(7))
-        ?: today
-    val timeline = (0L..29L).map { offset ->
-        val date = windowStart.plusDays(offset)
-        val cents = activeCny
-            .filter { it.nextChargeOn.toLocalDate() == date }
-            .sumOf { it.amountCents }
-        val kind = when {
-            date < today -> DayKind.Overdue
-            date == today -> DayKind.Today
-            else -> DayKind.Future
-        }
-        TimelineDayUi(date, cents, kind)
-    }
-
-    val tickCount = 4
-    val tickIndices = if (timeline.isEmpty()) emptyList() else listOf(0, 9, 19, timeline.lastIndex).distinct()
-    val timelineTicks = tickIndices.map { index ->
-        val date = timeline[index].date
-        String.format(java.util.Locale.ROOT, "%02d-%02d", date.monthValue, date.dayOfMonth)
-    }
-    val tickFraction = tickCount // 保留刻度数量语义
-
     return UiLedger(
         today = today,
-        timeline = timeline,
-        timelineTicks = timelineTicks,
         assets = assets,
         assetCount = assets.size,
         categories = categoryTotals,
