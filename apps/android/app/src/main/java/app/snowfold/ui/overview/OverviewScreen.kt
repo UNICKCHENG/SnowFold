@@ -376,30 +376,51 @@ fun StartupBanner(text: String) {
 @Composable
 fun KeyUnavailableCard(text: String, onImport: () -> Unit) {
     val colors = appColors()
+    val largeFont = LocalDensity.current.fontScale > 1.3f
+    val heading: @Composable () -> Unit = {
+        Text(
+            stringResource(R.string.key_unavailable_title),
+            style = SnowFoldType.bodyMedium.appType(),
+            color = colors.text,
+        )
+    }
+    val help: @Composable () -> Unit = {
+        Text(text, style = SnowFoldType.caption.appType(), color = colors.text2)
+    }
+    val action: @Composable () -> Unit = {
+        SfButton(
+            stringResource(R.string.import_recovery_code),
+            onImport,
+            style = app.snowfold.ui.components.ButtonStyle.Secondary,
+            inlineHeight = 36.dp,
+            testTag = "key-import",
+        )
+    }
     SfCard(modifier = Modifier.testTag("key-card")) {
-        Column(Modifier.background(colors.warnSoft).padding(DesignTokens.space4)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(AppIcon.key, contentDescription = null, tint = colors.warn, modifier = Modifier.size(20.dp))
-                Text(
-                    stringResource(R.string.key_unavailable_title),
-                    style = SnowFoldType.bodyMedium.appType(),
-                    color = colors.text,
-                    modifier = Modifier.padding(start = DesignTokens.space2),
-                )
+        if (largeFont) {
+            Column(Modifier.background(colors.warnSoft).padding(DesignTokens.space4)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(DesignTokens.space3)) {
+                    Icon(AppIcon.key, contentDescription = null, tint = colors.warn, modifier = Modifier.size(20.dp))
+                    heading()
+                }
+                Spacer(Modifier.height(DesignTokens.space2))
+                help()
+                Spacer(Modifier.height(DesignTokens.space3))
+                action()
             }
-            Text(
-                text,
-                style = SnowFoldType.caption.appType(),
-                color = colors.text2,
-                modifier = Modifier.padding(top = DesignTokens.space2),
-            )
-            SfButton(
-                stringResource(R.string.import_recovery_code),
-                onImport,
-                style = app.snowfold.ui.components.ButtonStyle.Secondary,
-                inlineHeight = DesignTokens.buttonInlineHeight,
-                modifier = Modifier.padding(top = DesignTokens.space3),
-            )
+        } else {
+            Row(
+                Modifier.fillMaxWidth().background(colors.warnSoft).padding(DesignTokens.space4),
+                horizontalArrangement = Arrangement.spacedBy(DesignTokens.space3),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(AppIcon.key, contentDescription = null, tint = colors.warn, modifier = Modifier.size(20.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(DesignTokens.space1)) {
+                    heading()
+                    help()
+                }
+                action()
+            }
         }
     }
 }

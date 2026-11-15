@@ -33,7 +33,6 @@ import app.snowfold.ui.components.AppIcon
 import app.snowfold.ui.components.FormFootnote
 import app.snowfold.ui.components.RowDivider
 import app.snowfold.ui.components.SfCard
-import app.snowfold.ui.components.SfSegmented
 import app.snowfold.ui.components.SfSwitch
 import app.snowfold.ui.components.SfTextField
 import app.snowfold.ui.components.SelectorField
@@ -67,6 +66,7 @@ fun SyncSettings(vm: MainViewModel, onExportRecovery: () -> Unit) {
     var clearConfirm by remember { mutableStateOf(false) }
     var intervalOpen by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
+    var backendOpen by remember { mutableStateOf(false) }
     val showForm = config == null || editing
 
     Text(
@@ -80,6 +80,25 @@ fun SyncSettings(vm: MainViewModel, onExportRecovery: () -> Unit) {
         // 未配置或点「修改」：表单卡片（标签宽 112 + 输入），字段已按当前配置预填
         SfCard {
             Column {
+                SyncFormRow(R.string.sync_backend_label) {
+                    Box {
+                        SelectorField(
+                            value = backend.backendLabel(),
+                            onClick = { backendOpen = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            testTag = "sync-backend",
+                        )
+                        app.snowfold.ui.components.SfMenu(
+                            expanded = backendOpen,
+                            onDismiss = { backendOpen = false },
+                            items = listOf(
+                                stringResource(R.string.sync_backend_s3) to { backend = SyncBackend.S3; backendOpen = false },
+                                stringResource(R.string.sync_backend_webdav) to { backend = SyncBackend.WEB_DAV; backendOpen = false },
+                            ),
+                        )
+                    }
+                }
+                RowDivider(startInset = DesignTokens.pageMargin)
                 SyncFieldRow(R.string.sync_endpoint_label, endpoint, { endpoint = it }, "sync-endpoint")
                 RowDivider(startInset = DesignTokens.pageMargin)
                 if (backend == SyncBackend.S3) {
@@ -90,10 +109,6 @@ fun SyncSettings(vm: MainViewModel, onExportRecovery: () -> Unit) {
                 }
                 SyncFieldRow(R.string.sync_prefix_label, prefix, { prefix = it }, "sync-prefix")
                 RowDivider(startInset = DesignTokens.pageMargin)
-                if (backend == SyncBackend.S3) {
-                    SwitchRow(R.string.sync_path_style_label, pathStyle, { pathStyle = it })
-                    RowDivider(startInset = DesignTokens.pageMargin)
-                }
                 SyncFieldRow(
                     if (backend == SyncBackend.S3) R.string.sync_access_key_label else R.string.sync_username_label,
                     username, { username = it }, "sync-username",
@@ -104,19 +119,9 @@ fun SyncSettings(vm: MainViewModel, onExportRecovery: () -> Unit) {
                     secret, { secret = it }, "sync-secret",
                     obscured = true,
                 )
-                RowDivider(startInset = DesignTokens.pageMargin)
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = DesignTokens.pageMargin, vertical = DesignTokens.space3),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Spacer(Modifier.width(112.dp))
-                    SfSegmented(
-                        options = listOf(stringResource(R.string.sync_backend_s3), stringResource(R.string.sync_backend_webdav)),
-                        selected = if (backend == SyncBackend.S3) 0 else 1,
-                        onSelect = { backend = if (it == 0) SyncBackend.S3 else SyncBackend.WEB_DAV },
-                        modifier = Modifier.weight(1f),
-                        testTag = "sync-backend",
-                    )
+                if (backend == SyncBackend.S3) {
+                    RowDivider(startInset = DesignTokens.pageMargin)
+                    SwitchRow(R.string.sync_path_style_label, pathStyle, { pathStyle = it })
                 }
             }
         }
@@ -216,15 +221,7 @@ fun SyncSettings(vm: MainViewModel, onExportRecovery: () -> Unit) {
                 }
             }
         }
-        val errorNow = error
-        if (errorNow != null) {
-            Text(
-                stringResource(errorNow),
-                style = SnowFoldType.caption.appType(),
-                color = colors.neg,
-                modifier = Modifier.padding(top = DesignTokens.space2),
-            )
-        }
+        FormFootnote(error = error?.let { stringResource(it) }, help = stringResource(R.string.sync_help))
 
         // 同步策略组
         Spacer(Modifier.height(DesignTokens.space4))
@@ -280,12 +277,6 @@ fun SyncSettings(vm: MainViewModel, onExportRecovery: () -> Unit) {
             color = colors.text2,
             modifier = Modifier.padding(top = DesignTokens.space2),
         )
-        Text(
-            stringResource(R.string.sync_help),
-            style = SnowFoldType.caption.appType(),
-            color = colors.text2,
-            modifier = Modifier.padding(top = DesignTokens.space2),
-        )
 
         TextLink(
             stringResource(R.string.sync_clear_config),
@@ -323,23 +314,29 @@ private fun syncTimeDisplay(value: String?): String {
     }
 }
 
-/** 表单行（标签宽 112 + 输入）。 */
+/** 表单行（标签宽 112 + 输入）；存储类型与普通字段共用布局。 */
 @Composable
-private fun SyncFieldRow(label: Int, value: String, onChange: (String) -> Unit, tag: String, obscured: Boolean = false) {
+private fun SyncFormRow(label: Int, content: @Composable () -> Unit) {
     if (androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.3f) {
         Column(Modifier.fillMaxWidth().padding(DesignTokens.pageMargin)) {
             Text(stringResource(label), style = SnowFoldType.body.appType(), color = appColors().text)
             Spacer(Modifier.height(DesignTokens.space2))
-            SfTextField(value, onChange, Modifier.fillMaxWidth(), obscured = obscured, testTag = tag)
+            content()
         }
     } else {
         Row(Modifier.fillMaxWidth().padding(horizontal = DesignTokens.pageMargin, vertical = DesignTokens.space2),
             verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(label), style = SnowFoldType.body.appType(), color = appColors().text, modifier = Modifier.width(112.dp))
-            SfTextField(value, onChange, Modifier.weight(1f), obscured = obscured, testTag = tag)
+            Box(Modifier.weight(1f)) { content() }
         }
     }
+}
 
+@Composable
+private fun SyncFieldRow(label: Int, value: String, onChange: (String) -> Unit, tag: String, obscured: Boolean = false) {
+    SyncFormRow(label) {
+        SfTextField(value, onChange, Modifier.fillMaxWidth(), obscured = obscured, testTag = tag)
+    }
 }
 
 @Composable

@@ -162,6 +162,7 @@ class SyncDeliveryTest {
             screenshot("settings-sync-s3")
             compose.onNodeWithTag("sync-secret").performScrollTo()
             screenshot("settings-sync-s3-credentials")
+            compose.onNodeWithTag("sync-backend").performScrollTo().performClick()
             compose.onNodeWithText(context.getString(R.string.sync_backend_webdav)).performClick()
             compose.onNodeWithTag("sync-secret").performScrollTo()
             screenshot("settings-sync-webdav")

@@ -7,6 +7,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -539,27 +540,47 @@ fun AssetDetailContent(
                         .fillMaxWidth()
                         .padding(horizontal = DesignTokens.pageMargin, vertical = DesignTokens.space3),
                 ) {
-                    app.snowfold.ui.components.ValueRow(
-                        leading = {
-                            Text(historyTimestamp(entry.recordedAt), style = SnowFoldType.body.appType(), color = colors.text)
-                            androidx.compose.foundation.layout.FlowRow(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                if (entry.isCurrent) {
-                                    PillBadge(stringResource(R.string.history_current), colors.brandSoft, colors.brand)
-                                    Spacer(Modifier.width(DesignTokens.space2))
+                    val largeFont = LocalDensity.current.fontScale > 1.3f
+                    val metadata: @Composable () -> Unit = {
+                        Text(
+                            historyTimestamp(entry.recordedAt),
+                            style = SnowFoldType.body.appType(), color = colors.text,
+                            softWrap = largeFont,
+                            modifier = Modifier.testTag("history-time-${entry.id}"),
+                        )
+                        androidx.compose.foundation.layout.FlowRow(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (entry.isCurrent) {
+                                PillBadge(stringResource(R.string.history_current), colors.brandSoft, colors.brand)
+                                Spacer(Modifier.width(DesignTokens.space2))
+                            }
+                            Text(entry.deltaText ?: stringResource(R.string.history_initial), style = SnowFoldType.caption.appType(), color = colors.text2)
+                        }
+                    }
+                    val correction: @Composable () -> Unit = {
+                        if (onCorrect != null) TextLink(
+                            stringResource(R.string.correct_history), { onCorrect(entry.id) },
+                            testTag = "history-correct-${entry.id}",
+                        )
+                    }
+                    if (largeFont) {
+                        metadata()
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            AmountRowText(entry.amountText, color = if (asset.categoryIndex == 4) colors.neg else colors.text)
+                            correction()
+                        }
+                    } else {
+                        // 时间先取自然宽度；金额在剩余空间内按统一金额规则缩放。
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.width(IntrinsicSize.Max)) { metadata() }
+                            Spacer(Modifier.width(DesignTokens.space3))
+                            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                                    AmountRowText(entry.amountText, color = if (asset.categoryIndex == 4) colors.neg else colors.text)
                                 }
-                                Text(entry.deltaText ?: stringResource(R.string.history_initial), style = SnowFoldType.caption.appType(), color = colors.text2)
+                                correction()
                             }
-                        },
-                        trailing = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                AmountRowText(entry.amountText, color = if (asset.categoryIndex == 4) colors.neg else colors.text)
-                                if (onCorrect != null) TextLink(
-                                    stringResource(R.string.correct_history), { onCorrect(entry.id) },
-                                    testTag = "history-correct-${entry.id}",
-                                )
-                            }
-                        },
-                    )
+                        }
+                    }
                 }
             }
         }

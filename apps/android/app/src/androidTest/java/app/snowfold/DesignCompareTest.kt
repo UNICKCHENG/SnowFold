@@ -204,6 +204,15 @@ class DesignCompareTest {
         val first = core.data().assets.first { it.categoryCode == "cash" }
         compose.onNodeWithTag("assets-list").performScrollToNode(hasTestTag("asset-${first.id}"))
         compose.onNodeWithTag("asset-${first.id}").performClick()
+        if (context.resources.configuration.fontScale <= 1.3f) {
+            val entry = core.data().history.first { it.assetId == first.id }
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            compose.onNodeWithTag("history-time-${entry.id}").performSemanticsAction(
+                androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult,
+            ) { it(layouts) }
+            org.junit.Assert.assertEquals("默认字号的日期与时间应完整显示为一行", 1, layouts.single().lineCount)
+            org.junit.Assert.assertFalse(layouts.single().hasVisualOverflow)
+        }
         shot("02-asset-detail-history")
     }
 
@@ -299,7 +308,10 @@ class DesignCompareTest {
             "test-credential")
         core.setSyncPolicy(app.snowfold.core.SyncPolicy(false, 0u, false))
         core.setSyncEnabled(true)
-        launch(); nav("settings"); shot("06-settings-full-sync-on")
+        launch(); nav("settings")
+        compose.onAllNodesWithText(context.getString(R.string.sync_help), useUnmergedTree = true).assertCountEquals(1)
+        compose.onAllNodesWithText(context.getString(R.string.sync_interval_help), useUnmergedTree = true).assertCountEquals(1)
+        shot("06-settings-full-sync-on")
     }
 
     @Test fun capture19_confirm_clear() {
@@ -344,10 +356,25 @@ class DesignCompareTest {
     }
 
     @Test fun capture22_settings_off() {
-        seedDefault(sync = false); core.exportRecoveryCode(); launch(); nav("settings"); shot("06-settings")
+        seedDefault(sync = false); core.exportRecoveryCode(); launch(); nav("settings")
+        compose.onAllNodesWithText(context.getString(R.string.sync_help), useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithTag("sync-backend").assertExists()
+        val backend = compose.onNodeWithTag("sync-backend").getUnclippedBoundsInRoot()
+        val endpoint = compose.onNodeWithTag("sync-endpoint").getUnclippedBoundsInRoot()
+        org.junit.Assert.assertTrue("存储类型应位于服务地址之前", backend.top < endpoint.top)
+        shot("06-settings")
         compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("sync-section"))
         shot("06-settings-full-sync-off")
-        compose.onNodeWithTag("sync-save").performScrollTo(); shot("06-settings-full-sync-off-bottom")
+        compose.onNodeWithTag("sync-save").performScrollTo()
+        if (context.resources.configuration.screenWidthDp < 600) {
+            val save = compose.onNodeWithTag("sync-save").fetchSemanticsNode().boundsInRoot
+            val tabs = compose.onNodeWithTag("nav-settings").fetchSemanticsNode().boundsInRoot
+            val covered = save.bottom - tabs.top + 16 * context.resources.displayMetrics.density
+            if (covered > 0f) compose.onNodeWithTag("settings-list").performSemanticsAction(
+                androidx.compose.ui.semantics.SemanticsActions.ScrollBy,
+            ) { it(0f, covered) }
+        }
+        shot("06-settings-full-sync-off-bottom")
     }
 
     @Test fun capture23_confirm_import() {
@@ -437,6 +464,11 @@ class DesignCompareTest {
             }
         }
         compose.waitUntil(5_000) { compose.onAllNodesWithTag("key-card").fetchSemanticsNodes().isNotEmpty() }
+        if (context.resources.configuration.fontScale <= 1.3f) {
+            val title = compose.onNodeWithText(context.getString(R.string.key_unavailable_title)).fetchSemanticsNode().boundsInRoot
+            val action = compose.onNodeWithTag("key-import").fetchSemanticsNode().boundsInRoot
+            org.junit.Assert.assertTrue("导入按钮在说明右侧并与标题顶对齐", action.left >= title.right && action.top <= title.bottom)
+        }
         shot("09-error-key")
     }
 
@@ -473,7 +505,15 @@ class DesignCompareTest {
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("sync-failed-dot", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
             if (compose.onAllNodesWithContentDescription(context.getString(R.string.close)).fetchSemanticsNodes().isNotEmpty())
                 compose.onNodeWithContentDescription(context.getString(R.string.close)).performClick()
+            compose.onNodeWithTag("sync-failed-dot", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithContentDescription(context.getString(R.string.sync_button_failed_a11y)).assertExists()
             shot("08-sync-failed")
+            val dot = compose.onNodeWithTag("sync-failed-dot", useUnmergedTree = true).fetchSemanticsNode().boundsInWindow
+            val pixels = instrumentation.uiAutomation.takeScreenshot()
+            val center = pixels.getPixel(dot.center.x.toInt(), dot.center.y.toInt())
+            pixels.recycle()
+            val expected = if (args.getString("captureTheme") == "dark") 0xFFFF6A5E.toInt() else 0xFFBF3228.toInt()
+            org.junit.Assert.assertEquals("失败红点中心像素应为 neg 色", expected, center)
         } finally { release.countDown() }
     }
 
