@@ -5,6 +5,7 @@ import Foundation
 extension AssetRecord: Identifiable {}
 extension SubscriptionRecord: Identifiable {}
 extension HistoryRecord: Identifiable {}
+extension HistoryCorrectionRecord: Identifiable {}
 
 import SwiftUI
 

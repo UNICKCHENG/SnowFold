@@ -6,125 +6,206 @@ import UIKit
 import AppKit
 #endif
 
-/// 语义色（浅/深成对），与 GPUI 桌面端 apps/desktop/src/app/components.rs 的
-/// Palette 完全一致——桌面端是设计基准，苹果端逐值对齐。
+/// 设计令牌。苹果端配色用系统语义色（2026-11-15 决策）：中性色、语义色、
+/// 品牌色与分类色全部映射到系统色，跟随深浅外观、「增强对比度」与玻璃材质透光；
+/// 映射只写在本文件，各视图继续用令牌名。玻璃表面上的文字与图标用层级样式（.primary/.secondary）。
 extension Color {
-    /// 背景（画布）
-    static let canvas = Color(light: 0xF1F1EE, dark: 0x0B0B0A)
-    /// 卡片
-    static let cardSurface = Color(light: 0xFFFFFF, dark: 0x171716)
-    /// 弱卡片/输入底
-    static let subtleSurface = Color(light: 0xF7F7F4, dark: 0x1E1E1C)
-    /// 悬停底
-    static let hoverSurface = Color(light: 0xFBFBF9, dark: 0x1C1C1A)
-    /// 主文字
-    static let ink = Color(light: 0x191917, dark: 0xF3F3EE)
-    /// 次级文字
-    static let inkMuted = Color(light: 0x6F6F68, dark: 0x9B9B93)
-    /// 三级文字（标签、说明）
-    static let ink3 = Color(light: 0x9D9D95, dark: 0x6C6C65)
-    /// 强调
-    static let accentBrand = Color(light: 0x2B59E0, dark: 0x8098FF)
-    /// 收入/资产正向
-    static let positiveBrand = Color(light: 0x1C7A50, dark: 0x58C795)
-    /// 支出/负债负向
-    static let negativeBrand = Color(light: 0xAE4A3C, dark: 0xE58A7A)
-    /// 分隔线
-    static let hairline = Color(light: 0x000000, alpha: 0x17, dark: 0xFFFFFF, darkAlpha: 0x15)
-    /// 强分隔线（输入框描边）
-    static let hairlineStrong = Color(light: 0x000000, alpha: 0x29, dark: 0xFFFFFF, darkAlpha: 0x29)
-    /// 强调弱底
-    static let accentSoft = Color(light: 0x2B59E0, alpha: 0x14, dark: 0x8098FF, darkAlpha: 0x26)
-    /// 正向弱底
-    static let positiveSoft = Color(light: 0x1C7A50, alpha: 0x14, dark: 0x58C795, darkAlpha: 0x26)
-    /// 负向弱底
-    static let negativeSoft = Color(light: 0xAE4A3C, alpha: 0x14, dark: 0xE58A7A, darkAlpha: 0x24)
-    /// 图表第二序列（美元）
-    static let markB = Color(light: 0x4A4A3F, dark: 0xC9C9BD)
-    /// 标签栏底
-    static let tabsBg = Color(light: 0x191917, alpha: 0x0E, dark: 0xFFFFFF, darkAlpha: 0x0F)
-    /// 激活标签底
-    static let activeTab = Color(light: 0xFFFFFF, dark: 0x2B2B28)
+    // MARK: 品牌色 —— 系统强调色（iOS/iPadOS = systemBlue，macOS 跟随用户在系统设置选的强调色）
 
-    init(light: UInt32, alpha: UInt8 = 0xFF, dark: UInt32, darkAlpha: UInt8 = 0xFF) {
-        #if canImport(UIKit)
-        self.init(uiColor: UIColor { traits in
-            let isDark = traits.userInterfaceStyle == .dark
-            let value = isDark ? dark : light
-            let a = isDark ? darkAlpha : alpha
-            return UIColor(red: CGFloat((value >> 16) & 0xFF) / 255,
-                           green: CGFloat((value >> 8) & 0xFF) / 255,
-                           blue: CGFloat(value & 0xFF) / 255,
-                           alpha: CGFloat(a) / 255)
+    /// 主按钮、选中态、分段控件、开关、链接、焦点环
+    static let brand = Color.accentColor
+    /// 选中行与导航选中项的底、空状态圆底、浅色按钮底
+    static let brandSoft = brand.opacity(0.14)
+    /// 品牌色实底上的文字与图标
+    static let onBrand = Color.white
+
+    // MARK: 中性与语义色
+
+    #if canImport(UIKit)
+    /// 窗口背景
+    static let bg = Color(uiColor: .systemGroupedBackground)
+    /// 卡片、弹层（sheet 内系统自动抬升）
+    static let cardBg = Color(uiColor: .secondarySystemGroupedBackground)
+    /// 分隔线、输入框描边、禁用底
+    static let sep = Color(uiColor: .separator)
+    /// 主文字
+    static let ink = Color(uiColor: .label)
+    /// 次要文字、未选中图标
+    static let text2 = Color(uiColor: .secondaryLabel)
+    /// 负债、负值、逾期、错误、危险按钮
+    static let neg = Color(uiColor: .systemRed)
+    /// 提醒：7 天内扣费、密钥不可用
+    static let warn = Color(uiColor: .systemOrange)
+    /// 成功：续费、同步完成
+    static let pos = Color(uiColor: .systemGreen)
+    /// 分类识别色的系统映射
+    private static let catCash = Color(uiColor: .systemOrange)
+    private static let catFixed = Color(uiColor: .systemGreen)
+    private static let catInvestment = Color(uiColor: .systemIndigo)
+    private static let catReceivable = Color(uiColor: .systemTeal)
+    #elseif canImport(AppKit)
+    /// 分组页面底与卡片以系统窗口色为基准，浅色白卡、深色抬升卡片。
+    static let bg = macSurface(isCard: false)
+    static let cardBg = macSurface(isCard: true)
+
+    private static func macSurface(isCard: Bool) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            var surface = NSColor.windowBackgroundColor
+            appearance.performAsCurrentDrawingAppearance {
+                let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                let window = NSColor.windowBackgroundColor.usingColorSpace(.sRGB) ?? .windowBackgroundColor
+                // 系统窗口底在浅色下也是白色，轻叠主文字色建立分组层次。
+                let lifted = window.blended(withFraction: dark ? 0.07 : 0.04, of: .labelColor) ?? window
+                surface = dark ? (isCard ? lifted : window) : (isCard ? window : lifted)
+            }
+            return surface
         })
-        #elseif canImport(AppKit)
-        self.init(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
-            let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark, .aqua, .vibrantLight]) != .aqua
-                && appearance.bestMatch(from: [.darkAqua, .vibrantDark, .aqua, .vibrantLight]) != .vibrantLight
-            let value = isDark ? dark : light
-            let a = isDark ? darkAlpha : alpha
-            return NSColor(srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
-                           green: CGFloat((value >> 8) & 0xFF) / 255,
-                           blue: CGFloat(value & 0xFF) / 255,
-                           alpha: CGFloat(a) / 255)
-        }))
-        #else
-        self.init(.white)
-        #endif
     }
+    /// 分隔线、输入框描边、禁用底
+    static let sep = Color(nsColor: .separatorColor)
+    /// 主文字
+    static let ink = Color(nsColor: .labelColor)
+    /// 次要文字、未选中图标
+    static let text2 = Color(nsColor: .secondaryLabelColor)
+    /// 负债、负值、逾期、错误、危险按钮
+    static let neg = Color(nsColor: .systemRed)
+    /// 提醒：7 天内扣费、密钥不可用
+    static let warn = Color(nsColor: .systemOrange)
+    /// 成功：续费、同步完成
+    static let pos = Color(nsColor: .systemGreen)
+    /// 分类识别色的系统映射
+    private static let catCash = Color(nsColor: .systemOrange)
+    private static let catFixed = Color(nsColor: .systemGreen)
+    private static let catInvestment = Color(nsColor: .systemIndigo)
+    private static let catReceivable = Color(nsColor: .systemTeal)
+    #endif
+
+    /// 软色：对应语义色的 14% 透明度填充，随系统色深浅变化
+    static let negSoft = neg.opacity(0.14)
+    static let warnSoft = warn.opacity(0.14)
+
+    /// 分类识别色（图标块与构成条专用，不用于文字）
+    static func categoryColor(_ code: String) -> Color {
+        switch code {
+        case "fixed": catFixed
+        case "investment": catInvestment
+        case "receivable": catReceivable
+        case "debt": neg
+        default: catCash // cash
+        }
+    }
+
+    /// 分类图标块底色（cat-*-soft）
+    static func categorySoft(_ code: String) -> Color {
+        switch code {
+        case "fixed": catFixed.opacity(0.14)
+        case "investment": catInvestment.opacity(0.14)
+        case "receivable": catReceivable.opacity(0.14)
+        case "debt": negSoft
+        default: catCash.opacity(0.14) // cash
+        }
+    }
+
 }
 
 extension ShapeStyle where Self == Color {
-    static var negativeBrand: Color { .negativeBrand }
-    static var accentBrand: Color { .accentBrand }
-    static var positiveBrand: Color { .positiveBrand }
+    static var brand: Color { .brand }
+    static var neg: Color { .neg }
+    static var pos: Color { .pos }
+    static var warn: Color { .warn }
+    static var ink: Color { .ink }
+    static var text2: Color { .text2 }
+    static var cardBg: Color { .cardBg }
 }
 
-/// 五分类外观（SF Symbol + 桌面端同款双色 chip）。
-/// 桌面端 category_tint：cash→accent、fixed→棕、investment→正向绿、receivable→灰、debt→负向红。
+/// 五分类外观：名称与图标（IconMCP 线条图标入 Asset Catalog，实心版用于选中态）。
 enum CategoryStyle {
     static let order = ["cash", "fixed", "investment", "receivable", "debt"]
 
     static func name(_ code: String) -> String {
-        switch code {
-        case "fixed": "固定资产"
-        case "investment": "投资理财"
-        case "receivable": "应收款"
-        case "debt": "负债"
-        default: "流动资金"
-        }
+        Copy.categoryName(code)
     }
 
+    /// 线条图标（Asset Catalog 里的模板图）。
     static func icon(_ code: String) -> String {
         switch code {
-        case "fixed": "house.fill"
-        case "investment": "chart.line.uptrend.xyaxis"
-        case "receivable": "banknote.fill"
-        case "debt": "creditcard.fill"
-        default: "wallet.pass.fill"
+        case "fixed": "ic-home"
+        case "investment": "ic-trending-up"
+        case "receivable": "ic-hand-coins"
+        case "debt": "ic-credit-card"
+        default: "ic-banknote" // cash
         }
     }
 
-    /// (chip 底色, 图标色)
-    static func tint(_ code: String) -> (chip: Color, glyph: Color) {
-        switch code {
-        case "fixed":
-            // 桌面端浅深同值：bg 0x8c6d3f1a / glyph 0x8c6d3f
-            (Color(light: 0x8C6D3F, alpha: 0x1A, dark: 0x8C6D3F, darkAlpha: 0x1A),
-             Color(light: 0x8C6D3F, dark: 0x8C6D3F))
-        case "investment":
-            (.positiveSoft, .positiveBrand)
-        case "receivable":
-            (Color(light: 0x6D6D68, alpha: 0x1A, dark: 0x6D6D68, darkAlpha: 0x1A), .inkMuted)
-        case "debt":
-            (Color(light: 0xAE4A3C, alpha: 0x17, dark: 0xE58A7A, darkAlpha: 0x24), .negativeBrand)
-        default:
-            (Color(light: 0x2B59E0, alpha: 0x17, dark: 0x8098FF, darkAlpha: 0x24), .accentBrand)
-        }
-    }
-
-    /// 分类排序（桌面端 CATEGORIES 顺序）
     static func rank(_ code: String) -> Int {
         order.firstIndex(of: code) ?? 9
     }
+}
+
+/// 形态分档：Mac 为桌面档（正文字号 13、不随系统缩放），iPhone/iPad 为移动档。
+enum Ds {
+    static let isDesktop: Bool = {
+        #if os(macOS)
+        return true
+        #else
+        return false
+        #endif
+    }()
+
+    /// 设计字号（§2）：桌面 15/13/11，移动 17/17/13；语义样式保证动态字体缩放。
+    static func sectionTitle() -> Font {
+        #if os(macOS)
+        .system(size: 15, weight: .semibold)
+        #else
+        .body.weight(.semibold)
+        #endif
+    }
+
+    static func body() -> Font {
+        #if os(macOS)
+        .system(size: 13)
+        #else
+        .body
+        #endif
+    }
+
+    static func bodyMedium() -> Font {
+        #if os(macOS)
+        .system(size: 13, weight: .medium)
+        #else
+        .body.weight(.medium)
+        #endif
+    }
+
+    /// 辅助级：标签、说明、副标题、徽标、分组头。
+    static func aux() -> Font {
+        #if os(macOS)
+        .system(size: 11)
+        #else
+        .footnote
+        #endif
+    }
+
+    static func auxMedium() -> Font {
+        #if os(macOS)
+        .system(size: 11, weight: .medium)
+        #else
+        .footnote.weight(.medium)
+        #endif
+    }
+
+    // MARK: 尺寸（§4 表）
+
+    static var rowHeight: CGFloat { isDesktop ? 44 : 52 }
+    static var doubleRowHeight: CGFloat { isDesktop ? 56 : 64 }
+    static var buttonHeight: CGFloat { isDesktop ? 32 : 50 }
+    static var inlineButtonHeight: CGFloat { isDesktop ? 28 : 32 }
+    static var fieldHeight: CGFloat { isDesktop ? 32 : 44 }
+    static var segmentHeight: CGFloat { isDesktop ? 28 : 32 }
+    static var chipSize: CGFloat { isDesktop ? 28 : 32 }
+    static var chipIcon: CGFloat { isDesktop ? 16 : 20 }
+    static var avatarSize: CGFloat { isDesktop ? 32 : 36 }
+    static var iconButtonSize: CGFloat { isDesktop ? 32 : 44 }
+    static var navIcon: CGFloat { isDesktop ? 20 : 24 }
+    static var toolbarIcon: CGFloat { 20 }
 }

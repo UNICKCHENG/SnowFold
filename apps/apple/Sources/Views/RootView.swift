@@ -3,7 +3,55 @@ import SwiftUI
 import UIKit
 #endif
 
-// MARK: - 分栏动作桥（菜单命令 → 当前窗口）
+// MARK: - 弹层与设置窗口类型
+// Router 与 UndoState 声明在 Store.swift（模型层），此处只放界面侧扩展类型。
+
+/// Mac 设置窗口的四个页签（design.md §9.6）。
+enum MacSettingsTab: String, CaseIterable, Identifiable {
+    case general, data, seal, about
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: return Copy.settingsTabGeneral
+        case .data: return Copy.settingsTabData
+        case .seal: return Copy.settingsTabSecuritySync
+        case .about: return Copy.settingsTabAbout
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .general: return "ic-settings"
+        case .data: return "ic-database"
+        case .seal: return "ic-shield-lock"
+        case .about: return "ic-info"
+        }
+    }
+}
+
+/// 全局弹层（添加资产、调整余额、修正历史、新建/编辑订阅）。
+enum Modal: Identifiable {
+    case newAsset(categoryCode: String)
+    case renameAsset(AssetRecord)
+    case adjustBalance(AssetRecord)
+    case correctHistory(HistoryRecord, assetName: String)
+    case newSubscription
+    case editSubscription(SubscriptionRecord)
+
+    var id: String {
+        switch self {
+        case .newAsset(let code): return "new-asset-\(code)"
+        case .renameAsset(let asset): return "rename-\(asset.id)"
+        case .adjustBalance(let asset): return "balance-\(asset.id)"
+        case .correctHistory(let record, _): return "correct-\(record.id)"
+        case .newSubscription: return "new-subscription"
+        case .editSubscription(let record): return "edit-\(record.id)"
+        }
+    }
+}
+
+// MARK: - 菜单命令桥
 
 /// 由 SplitRootView 注入的焦点动作；菜单命令通过它驱动当前窗口。
 struct AppActions {
@@ -30,17 +78,17 @@ struct AppCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("新建资产") { actions?.newMixed() }
+            Button(Copy.addAsset) { actions?.newMixed() }
                 .keyboardShortcut("n", modifiers: .command)
             Button(Copy.newSubscription) { actions?.newSubscription() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
         }
-        CommandMenu("前往") {
-            Button("总览") { actions?.selectTab(.overview) }
+        CommandGroup(after: .sidebar) {
+            Button(Copy.overviewTitle) { actions?.selectTab(.overview) }
                 .keyboardShortcut("1", modifiers: .command)
-            Button("资产与负债") { actions?.selectTab(.assets) }
+            Button(Copy.assetsTitle) { actions?.selectTab(.assets) }
                 .keyboardShortcut("2", modifiers: .command)
-            Button("订阅") { actions?.selectTab(.subscriptions) }
+            Button(Copy.subscriptionsTitle) { actions?.selectTab(.subscriptions) }
                 .keyboardShortcut("3", modifiers: .command)
             Divider()
             Button("撤销最近的变动") { actions?.undo() }
@@ -50,95 +98,16 @@ struct AppCommands: Commands {
 }
 #endif
 
-// MARK: - 启动失败
-
-/// 打不开数据库时的整页错误（不展示业务内容）。
-struct StartupFailureView: View {
-    let message: String
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "internaldrive.badge.exclamationmark")
-                .font(.system(size: 40, weight: .light))
-                .foregroundStyle(Color.ink3)
-            Text(message)
-                .font(.callout)
-                .multilineTextAlignment(.center)
-                .textSelection(.enabled)
-                .padding(.horizontal, 28)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-// MARK: - 设置入口
-
-extension View {
-    func settingsToolbar() -> some View { settingsToolbar(syncOnPhone: true) { EmptyView() } }
-
-    func settingsToolbar<Actions: View>(syncOnPhone: Bool = false, @ViewBuilder actions: () -> Actions) -> some View {
-        toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                SettingsToolbarEntry()
-                actions()
-                if syncOnPhone { PageSyncToolbarEntry(showOnPhone: true) }
-            }
-        }
-    }
-}
-
-/// docs/mobile-layout.md §8：宽屏（iPad 常规宽度、Mac）设置只从侧边栏左下角进入；
-/// 手机与 iPad 分屏变窄（无侧边栏）保留右上角入口。Mac 用「设置」菜单（⌘,）。
-/// 注意：split 列表列在 iPad 全宽下按列宽（320pt）报 compact，因此该开关
-/// 由窗口根容器按窗口级 size class 统一注入，列内不自行判断。
-private struct ShowsSettingsToolbarKey: EnvironmentKey {
-    static let defaultValue = true
-}
-
-extension EnvironmentValues {
-    var showsSettingsToolbar: Bool {
-        get { self[ShowsSettingsToolbarKey.self] }
-        set { self[ShowsSettingsToolbarKey.self] = newValue }
-    }
-}
-
-private struct SettingsToolbarEntry: View {
-    @Environment(\.showsSettingsToolbar) private var shows
-
-    var body: some View {
-        #if os(macOS)
-        EmptyView()
-        #else
-        if shows {
-            SettingsSheetButton()
-        }
-        #endif
-    }
-}
-
-#if os(iOS)
-struct SettingsSheetButton: View {
-    @Environment(Router.self) private var router
-
-    var body: some View {
-        Button {
-            if UIDevice.current.userInterfaceIdiom == .pad { router.tab = .settings }
-            else { router.settingsPresented = true }
-        } label: {
-            Label(Copy.settingsTitle, systemImage: "slider.horizontal.3")
-        }
-    }
-}
-#endif
-
-// MARK: - iPhone 根容器
+// MARK: - 根容器
 
 struct RootView: View {
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var sizeClass
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
     @State private var sceneID = UUID()
 
     var body: some View {
@@ -148,7 +117,11 @@ struct RootView: View {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .failed(let message):
+                #if os(macOS)
+                SplitRootView(startupFailure: message)
+                #else
                 StartupFailureView(message: message)
+                #endif
             case .ready:
                 readyContent
             }
@@ -159,6 +132,7 @@ struct RootView: View {
             await SyncAcceptance.prepareIfRequested(store)
             #endif
             await store.setSceneActive(sceneID, active: scenePhase == .active)
+            await handleShotHooks()
         }
         .onChange(of: scenePhase) { _, phase in
             Task { await store.setSceneActive(sceneID, active: phase == .active) }
@@ -170,269 +144,506 @@ struct RootView: View {
     @ViewBuilder
     private var readyContent: some View {
         #if os(iOS)
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            SplitRootView()
+        if UIDevice.current.userInterfaceIdiom == .pad, sizeClass == .regular {
+            SplitRootView().environment(\.usesWideLayout, true)
         } else {
-            tabs
+            PhoneRootView().environment(\.usesWideLayout, false)
         }
         #else
-        SplitRootView()
+        SplitRootView().environment(\.usesWideLayout, true)
         #endif
     }
 
-    @ViewBuilder
-    private var tabs: some View {
-        TabView(selection: Binding(
-            get: { router.tab },
-            set: { router.tab = $0 }
-        )) {
+    /// 验收截图钩子（DEBUG 或显式 ACCEPTANCE 条件；见 AcceptanceCapture）。
+    @MainActor
+    private func handleShotHooks() async {
+        #if DEBUG || ACCEPTANCE
+        guard store.state == .ready else { return }
+        let arguments = CommandLine.arguments
+        func value(_ flag: String) -> String? {
+            guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else { return nil }
+            return arguments[index + 1]
+        }
+        if value("-SNOWFOLD_SHOT_DIALOG") == "asset" { router.modal = .newAsset(categoryCode: "cash") }
+        if value("-SNOWFOLD_SHOT_DIALOG") == "adjust",
+           let asset = store.ledger.assets.first { router.modal = .adjustBalance(asset) }
+        if value("-SNOWFOLD_SHOT_DIALOG") == "correct",
+           let record = store.ledger.history.first,
+           let asset = store.ledger.assets.first(where: { $0.id == record.assetId }) {
+            router.modal = .correctHistory(record, assetName: asset.name)
+        }
+        if value("-SNOWFOLD_SHOT_DIALOG") == "sub-new" { router.modal = .newSubscription }
+        if value("-SNOWFOLD_SHOT_DIALOG") == "sub-edit",
+           let record = store.ledger.subscriptions.first { router.modal = .editSubscription(record) }
+        if arguments.contains("-SNOWFOLD_SHOT_NOTICE") {
+            // 延后到截图窗口之前再显示（成功通知 4 秒后自动消失）。
+            try? await Task.sleep(for: .seconds(2))
+            store.showNotice(Copy.backupExported)
+        }
+        if arguments.contains("-SNOWFOLD_SHOT_UNDO"),
+           let asset = store.ledger.assets.first {
+            // 变动一次余额触发真实撤销横幅（临时数据目录，不影响任何真实库）。
+            try? await store.changeBalance(id: asset.id, amountText: Fmt.decimal(asset.amountCents + 123_45))
+        }
+        #if os(macOS)
+        if let tab = value("-SNOWFOLD_SHOT_OPEN_SETTINGS") {
+            router.settingsTab = MacSettingsTab(rawValue: tab) ?? .general
+            await Task.yield()
+            openSettings()
+        }
+        #endif
+        #endif
+    }
+}
+
+// MARK: - 启动失败（§9.7）
+
+/// 打不开数据库时的整页错误：不展示业务内容、无按钮。
+struct StartupFailureView: View {
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 0) {
+            AppIcon(name: "ic-warning-triangle", size: 48)
+                .foregroundStyle(Color.neg)
+                .frame(width: 88, height: 88)
+                .background(Color.negSoft, in: Circle())
+                .padding(.bottom, 16)
+            Text(Copy.startupErrorTitle)
+                .font(Ds.sectionTitle())
+                .foregroundStyle(Color.ink)
+                .padding(.bottom, 8)
+            Text(message)
+                .font(Ds.body())
+                .foregroundStyle(Color.text2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 280)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.bg)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - iPhone 根容器（docs/mobile-layout.md §1）
+
+struct PhoneRootView: View {
+    @Environment(SnowFoldStore.self) private var store
+    @Environment(Router.self) private var router
+
+    var body: some View {
+        @Bindable var router = router
+        TabView(selection: $router.tab) {
             NavigationStack { OverviewView() }
                 .bannerOverlay()
-                .tabItem { Label("总览", systemImage: "chart.pie.fill") }
+                .tabItem { tabLabel("ic-pie-chart", Copy.overviewTitle) }
                 .tag(Router.Tab.overview)
                 .accessibilityIdentifier("nav-overview")
             NavigationStack { AssetsView() }
                 .bannerOverlay()
-                .tabItem { Label("资产", systemImage: "creditcard.fill") }
+                .tabItem { tabLabel("ic-wallet", Copy.assetsTab) }
                 .tag(Router.Tab.assets)
                 .accessibilityIdentifier("nav-assets")
             NavigationStack { SubscriptionsView() }
                 .bannerOverlay()
-                .tabItem { Label("订阅", systemImage: "calendar.badge.clock") }
+                .tabItem { tabLabel("ic-calendar-repeat", Copy.subscriptionsTitle) }
                 .tag(Router.Tab.subscriptions)
                 .accessibilityIdentifier("nav-subscriptions")
+            NavigationStack { SettingsView() }
+                .bannerOverlay()
+                .tabItem { tabLabel("ic-settings", Copy.settingsTitle) }
+                .tag(Router.Tab.settings)
+                .accessibilityIdentifier("nav-settings")
         }
-        .sheet(isPresented: Binding(
-            get: { router.settingsPresented },
-            set: { router.settingsPresented = $0 }
-        )) {
-            settingsSheet
+        .tint(.brand)
+        .sheet(item: Binding(
+            get: { router.modal },
+            set: { router.modal = $0 }
+        )) { modal in
+            ModalSheet(modal: modal)
         }
-        // 手机单列窗口级 compact：右上角设置入口照旧。
-        .environment(\.showsSettingsToolbar, sizeClass == .compact)
     }
 
-    private var settingsSheet: some View {
-        NavigationStack {
-            SettingsView()
-                .navigationTitle(Copy.settingsTitle)
-                #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button(Copy.done) { router.settingsPresented = false }
-                    }
-                }
-                #endif
+    private func tabLabel(_ icon: String, _ title: String) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            AppIcon(name: icon, size: 24)
         }
-        .presentationDetents([.large])
+    }
+}
+
+/// iOS 弹层容器：mobile-layout.md §6 的底部 sheet；iPad 居中表单宽 540。
+struct ModalSheet: View {
+    let modal: Modal
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        sheetContent
+            .frame(maxWidth: sizeClass == .regular ? 540 : nil)
+            .frame(maxWidth: .infinity)
+        // 弹层背景与背后的系统遮罩交给系统：Liquid Glass 材质 + 自动层级抬升。
+    }
+
+    @ViewBuilder
+    private var sheetContent: some View {
+        switch modal {
+        case .newAsset(let code):
+            AssetEditorSheet(mode: .new(categoryCode: code))
+        case .renameAsset(let asset):
+            AssetEditorSheet(mode: .rename(asset))
+        case .adjustBalance(let asset):
+            AssetEditorSheet(mode: .balance(asset))
+        case .correctHistory(let record, let name):
+            HistoryCorrectionSheet(history: record, assetName: name)
+        case .newSubscription:
+            SubscriptionEditorSheet(mode: .new)
+        case .editSubscription(let record):
+            SubscriptionEditorSheet(mode: .edit(record))
+        }
+    }
+}
+
+/// 由根布局注入的窗口级形态，避免 iPad 分栏内的 compact 尺寸误判。
+private struct WideLayoutKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var usesWideLayout: Bool {
+        get { self[WideLayoutKey.self] }
+        set { self[WideLayoutKey.self] = newValue }
+    }
+}
+
+/// 工具栏动作只在手机形态挂载（iPad/Mac 由分栏容器统一挂载，避免重复按钮）。
+struct PhoneOnlyToolbar<Actions: View>: ViewModifier {
+    @ViewBuilder var actions: () -> Actions
+    @Environment(\.usesWideLayout) private var wide
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if wide {
+            content
+        } else {
+            content.toolbar { ToolbarItem(placement: .topBarTrailing) { actions() } }
+        }
+        #else
+        content
+        #endif
+    }
+}
+
+struct PhoneOnlyInlineTitle: ViewModifier {
+    @Environment(\.usesWideLayout) private var wide
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if wide {
+            content
+        } else {
+            content.navigationBarTitleDisplayMode(.inline)
+        }
+        #else
+        content
+        #endif
     }
 }
 
 extension View {
-    /// 撤销与通知横幅：挂在每个 tab 的 NavigationStack 上，浮在内容底部、标签栏之上。
-    func bannerOverlay() -> some View {
+    func phoneToolbar<Actions: View>(@ViewBuilder actions: @escaping () -> Actions) -> some View {
+        modifier(PhoneOnlyToolbar(actions: actions))
+    }
+
+    func phoneInlineTitle() -> some View {
+        modifier(PhoneOnlyInlineTitle())
+    }
+
+    /// 撤销与通知横幅：浮在内容底部（iPhone 在标签栏上方，iPad/Mac 底部居中）。
+    func bannerOverlay(centered: Bool = false) -> some View {
         safeAreaInset(edge: .bottom, spacing: 0) {
             BannerOverlay()
+                .frame(maxWidth: centered ? 640 : .infinity)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, centered ? 24 : 8)
         }
     }
 }
 
-// MARK: - 分栏根容器（Mac 与 iPad 共用，docs/mobile-layout.md §8）
+// MARK: - 分栏根容器（Mac 与 iPad 常规宽度共用，docs/mobile-layout.md §8）
 
 struct SplitRootView: View {
+    var startupFailure: String? = nil
     @Environment(SnowFoldStore.self) private var store
     @Environment(Router.self) private var router
-    @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.horizontalSizeClass) private var sizeClass
-    @State private var newAssetCategory: String?
+    @Environment(\.colorScheme) private var colorScheme
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
     @State private var selectedAssetID: String?
-    @State private var selectedSubscription: SubscriptionRecord?
-    @State private var creatingSubscription = false
-
-    private struct CategoryPick: Identifiable {
-        let code: String
-        var id: String { code }
-    }
+    @State private var assetListScrollTo: String?
 
     var body: some View {
-        splitContent
-            #if os(macOS)
-            .frame(minWidth: 760, minHeight: 500)
-            #endif
-            .focusedValue(\.appActions, AppActions(
-                newMixed: {
-                    if router.tab == .subscriptions { beginSubscription() }
-                    else { newAssetCategory = "cash" }
-                },
-                newSubscription: { beginSubscription() },
-                undo: { Task { await store.undoNow() } },
-                selectTab: { router.tab = $0 }
-            ))
-            .sheet(item: Binding(
-                get: { newAssetCategory.map(CategoryPick.init) },
-                set: { newAssetCategory = $0?.code }
-            )) { pick in AssetEditorSheet(mode: .new(categoryCode: pick.code)) }
-            .onChange(of: store.syncGeneration) { _, _ in
-                if let id = selectedAssetID, !store.ledger.assets.contains(where: { $0.id == id }) {
-                    selectedAssetID = nil
-                }
-                if let record = selectedSubscription,
-                   !store.ledger.subscriptions.contains(where: { $0.id == record.id }) {
-                    selectedSubscription = nil
-                }
+        @Bindable var router = router
+        NavigationSplitView {
+            sidebar
+                .disabled(startupFailure != nil)
+                .opacity(startupFailure == nil ? 1 : 0.5)
+        } detail: {
+            if let startupFailure {
+                StartupFailureView(message: startupFailure)
+                    .navigationTitle("SnowFold")
+            } else {
+                detail
             }
-            .preferredColorScheme(store.theme.colorScheme)
-            // 窗口级判断：iPad 分屏变窄（无侧边栏）时恢复右上角设置；列表列的
-            // 列内 compact 不参与，宽屏各工具条一律无设置按钮。
-            .environment(\.showsSettingsToolbar, sizeClass == .compact)
-    }
-
-    @ViewBuilder
-    private var splitContent: some View {
-        if router.tab == .assets || router.tab == .subscriptions {
-            NavigationSplitView {
-                sidebar
-            } content: {
-                NavigationStack { listContent }
-                    .navigationSplitViewColumnWidth(min: 240, ideal: 320, max: 400)
-            } detail: {
-                NavigationStack {
-                    selectionDetail
-                        .toolbar { ToolbarItem(placement: .primaryAction) { PageSyncToolbarEntry() } }
-                }
-                    .bannerOverlay()
+        }
+        .modifier(SplitModalPresenter())
+        .focusedSceneValue(\.appActions, startupFailure == nil ? AppActions(
+            newMixed: {
+                router.modal = router.tab == .subscriptions ? .newSubscription : .newAsset(categoryCode: "cash")
+            },
+            newSubscription: { router.modal = .newSubscription },
+            undo: { Task { await store.undoNow() } },
+            selectTab: { router.tab = $0 }
+        ) : nil)
+        .onChange(of: store.ledger.assets.map(\.id)) { _, _ in
+            if let id = selectedAssetID, !store.ledger.assets.contains(where: { $0.id == id }) {
+                selectedAssetID = nil
             }
-            .navigationSplitViewStyle(.balanced)
-        } else {
-            NavigationSplitView {
-                sidebar
-            } detail: {
-                NavigationStack {
-                    if router.tab == .settings { SettingsView().navigationTitle(Copy.settingsTitle) }
-                    else { OverviewView() }
-                }
-                .bannerOverlay()
-            }
-            .navigationSplitViewStyle(.balanced)
         }
     }
+
+    // MARK: 侧边栏（§9.1：220 宽浮层；设置固定左下角）
 
     private var sidebar: some View {
-        // docs/mobile-layout.md §8：「设置」固定在侧边栏左下角，与上面三项之间只有留白。
-        // 上列为 List（原生选中样式）贪占剩余高度；设置行为自定义行，贴在底部
-        // （安全区之上再留 16pt）。选中样式：iPad 品牌蓝实底白字，Mac 系统灰底。
         VStack(spacing: 0) {
-            List(selection: Binding<Router.Tab?>(
-                get: { router.tab == .settings ? nil : router.tab },
-                set: { if let tab = $0 { router.tab = tab } }
-            )) {
-                Label("总览", systemImage: "chart.pie.fill").tag(Router.Tab.overview)
-                    .accessibilityIdentifier("nav-overview")
-                Label(Copy.assetsTitle, systemImage: "creditcard.fill").tag(Router.Tab.assets)
-                    .accessibilityIdentifier("nav-assets")
-                Label(Copy.subscriptionsTitle, systemImage: "calendar.badge.clock").tag(Router.Tab.subscriptions)
-                    .accessibilityIdentifier("nav-subscriptions")
+            #if os(iOS)
+            Text("SnowFold")
+                .font(Ds.sectionTitle())
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+            #endif
+            VStack(spacing: 2) {
+                sidebarRow(.overview, icon: "ic-pie-chart", title: Copy.overviewTitle)
+                sidebarRow(.assets, icon: "ic-wallet", title: Copy.assetsTab)
+                sidebarRow(.subscriptions, icon: "ic-calendar-repeat", title: Copy.subscriptionsTitle)
             }
-            .listStyle(.sidebar)
-            settingsRow
+            Spacer(minLength: 12)
+            sidebarRow(.settings, icon: "ic-settings", title: Copy.settingsTitle)
+                .padding(.bottom, 8)
         }
-        .navigationTitle("SnowFold")
-        .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 220)
+        .padding(.horizontal, 10)
+        .padding(.top, 4)
+        #if os(macOS)
+        .frame(minWidth: 220, idealWidth: 220, maxWidth: 220)
+        .navigationSplitViewColumnWidth(min: 220, ideal: 220, max: 220)
+        #else
+        .frame(minWidth: 260, idealWidth: 260, maxWidth: 260)
+        .navigationSplitViewColumnWidth(min: 260, ideal: 260, max: 260)
+        #endif
+        .accessibilityElement(children: .contain)
     }
 
-    // 与系统侧边栏行的图标-文字间距一致（iPad 选中条为胶囊形）。
-    #if os(macOS)
-    private static let settingsIconSpacing: CGFloat = 10
-    #else
-    private static let settingsIconSpacing: CGFloat = 14
-    #endif
-
-    /// 左下角固定的「设置」入口：贴底、无分隔线、命中区不小于 44pt。
-    private var settingsRow: some View {
-        let selected = router.tab == .settings
+    /// 侧边栏行：行高 32（桌面）/44（移动），图标 20/24 与文字间距 10/12；
+    /// 玻璃侧边栏上文字与图标用层级样式（选中 primary、未选中 secondary），
+    /// 选中底为 brandSoft（强调色 14% 浅底，同系统侧边栏选中观感）。
+    private func sidebarRow(_ tab: Router.Tab, icon: String, title: String) -> some View {
+        let selected = router.tab == tab
         return Button {
-            router.tab = .settings
-        } label: {
-            HStack(spacing: Self.settingsIconSpacing) {
-                #if os(macOS)
-                Image(systemName: "slider.horizontal.3")
-                    .foregroundStyle(Color.primary)
-                Text(Copy.settingsTitle)
-                    .foregroundStyle(Color.primary)
-                #else
-                Image(systemName: "slider.horizontal.3")
-                    .foregroundStyle(selected ? Color.white : Color.accentBrand)
-                Text(Copy.settingsTitle)
-                    .foregroundStyle(selected ? Color.white : Color.primary)
-                #endif
-            }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .padding(.horizontal, 15)
-            .padding(.vertical, 4)
             #if os(macOS)
+            if tab == .settings {
+                openSettings()
+                return
+            }
+            #endif
+            router.tab = tab
+        } label: {
+            HStack(spacing: Ds.isDesktop ? 10 : 12) {
+                AppIcon(name: icon, size: Ds.isDesktop ? 20 : 24, fill: selected)
+                    .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                Text(title)
+                    .font(selected ? Ds.bodyMedium() : Ds.body())
+                    .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(minHeight: Ds.isDesktop ? 32 : 44, alignment: .leading)
             .background(
-                selected ? AnyShapeStyle(Color.primary.opacity(0.1)) : AnyShapeStyle(.clear),
+                selected ? AnyShapeStyle(Color.brandSoft) : AnyShapeStyle(.clear),
                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
             )
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
-            #else
-            .background(
-                selected ? AnyShapeStyle(Color.accentBrand) : AnyShapeStyle(.clear),
-                in: Capsule(style: .continuous)
-            )
-            .padding(.horizontal, 16)
-            .padding(.bottom, 16)
-            #endif
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("nav-settings")
+        .accessibilityIdentifier("nav-" + tab.rawValue)
+        .accessibilityLabel(title)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
-    @ViewBuilder
-    private var listContent: some View {
-        if router.tab == .assets {
-            AssetsView(onSelect: { selectedAssetID = $0 }, selectedAssetID: selectedAssetID)
-                .task { if selectedAssetID == nil { selectedAssetID = store.ledger.assets.first?.id } }
-        } else {
-            SubscriptionsView(onEdit: {
-                creatingSubscription = false
-                selectedSubscription = $0
-            }, onNew: { beginSubscription() })
-        }
-    }
+    // MARK: 详情列
 
     @ViewBuilder
-    private var selectionDetail: some View {
-        if router.tab == .assets {
-            if let id = selectedAssetID {
-                AssetDetailView(assetID: id, onDelete: { selectedAssetID = nil })
-                    .id(id)
-            } else {
-                EmptyStateView(icon: "wallet.pass", title: "选择一项资产", message: "查看余额、历史与修正记录")
+    private var detail: some View {
+        NavigationStack {
+            switch router.tab {
+            case .overview:
+                OverviewView()
+            case .assets:
+                AssetsSplitView(selectedAssetID: $selectedAssetID, scrollTo: $assetListScrollTo)
+            case .subscriptions:
+                SubscriptionsView()
+            case .settings:
+                #if os(macOS)
+                OverviewView() // Mac 设置走独立窗口（⌘,），侧栏无设置项
+                #else
+                SettingsView()
+                #endif
             }
-        } else if creatingSubscription {
-            SubscriptionEditorSheet(mode: .new, embedded: true, onCompletion: endSubscription)
-                .id("new-subscription")
-        } else if let record = selectedSubscription {
-            SubscriptionEditorSheet(mode: .edit(record), embedded: true, onCompletion: endSubscription)
-                .id(record.id)
-        } else {
-            EmptyStateView(icon: "calendar", title: "选择一项订阅", message: "在这里查看和编辑扣费安排")
+        }
+        .bannerOverlay(centered: true)
+        .toolbar { ToolbarItem(placement: .primaryAction) { PageToolbarActions() } }
+    }
+}
+
+/// 资产页两栏（§9.3）：左列表 + 右概览/详情；未选中时右栏是总资产概览。
+struct AssetsSplitView: View {
+    @Environment(SnowFoldStore.self) private var store
+    @Binding var selectedAssetID: String?
+    @Binding var scrollTo: String?
+
+    var body: some View {
+        // design.md §9.3：未选中时右栏显示总资产概览，点条目后才进入详情。
+        Group {
+            #if os(macOS)
+            if store.ledger.assets.isEmpty {
+                MacEmptyStateContainer { AssetsView() }
+            } else {
+                columns
+            }
+            #else
+            columns
+            #endif
+        }
+            .navigationTitle(Copy.assetsTitle)
+            .background(Color.bg)
+    }
+
+    @ViewBuilder
+    private var columns: some View {
+        #if os(macOS)
+        HStack(alignment: .top, spacing: 24) {
+            AssetsListView(selectedAssetID: $selectedAssetID, scrollTo: $scrollTo, selectionMode: true, showsSummary: false)
+                .frame(width: 380)
+            AssetsDetailPane(selectedAssetID: selectedAssetID)
+        }
+        .padding(.horizontal, 32)
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        #else
+        HStack(alignment: .top, spacing: 24) {
+            AssetsListView(selectedAssetID: $selectedAssetID, scrollTo: $scrollTo, selectionMode: true, showsSummary: false)
+                .frame(maxWidth: .infinity)
+            AssetsDetailPane(selectedAssetID: selectedAssetID)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        #endif
+    }
+}
+
+/// 页面工具栏动作：同步（开启后）与「＋」；Mac/iPad 由分栏容器挂载。
+struct PageToolbarActions: View {
+    @Environment(SnowFoldStore.self) private var store
+    @Environment(Router.self) private var router
+
+    var body: some View {
+        HStack(spacing: 8) {
+            SyncToolbarButton()
+            if router.tab == .assets || router.tab == .overview {
+                ToolbarPlusButton(icon: "ic-plus", label: Copy.addAsset, identifier: "new-asset") {
+                    router.modal = .newAsset(categoryCode: router.focusAssetCategory ?? "cash")
+                }
+            }
+            if router.tab == .subscriptions {
+                ToolbarPlusButton(icon: "ic-plus", label: Copy.newSubscription, identifier: "new-subscription") {
+                    router.modal = .newSubscription
+                }
+            }
         }
     }
+}
 
-    private func beginSubscription() {
-        router.tab = .subscriptions
-        selectedSubscription = nil
-        creatingSubscription = true
+struct ToolbarPlusButton: View {
+    let icon: String
+    let label: String
+    let identifier: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            AppIcon(name: icon, size: 18)
+                // 玻璃工具栏按钮用层级样式，不吃全局 tint。
+                .foregroundStyle(.primary)
+        }
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(identifier)
     }
+}
 
-    private func endSubscription() {
-        creatingSubscription = false
-        selectedSubscription = nil
+// MARK: - macOS 居中弹层（§5.6 桌面弹层）
+
+/// mac 主窗口内的弹层宿主：遮罩 + 居中卡片（宽 480、圆角 16、浮层阴影）。
+struct SplitModalPresenter: ViewModifier {
+    @Environment(Router.self) private var router
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content
+            .overlay {
+                if let modal = router.modal {
+                    ZStack {
+                        (colorScheme == .dark ? Color.black.opacity(0.56) : Color.ink.opacity(0.32))
+                            .ignoresSafeArea()
+                            .transition(.opacity)
+                        MacDialogHost(modal: modal)
+                            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    }
+                }
+            }
+            .animation(.easeOut(duration: 0.15), value: router.modal?.id)
+        #else
+        content
+            .sheet(item: Binding(
+                get: { router.modal },
+                set: { router.modal = $0 }
+            )) { modal in
+                ModalSheet(modal: modal)
+            }
+        #endif
+    }
+}
+
+struct MacDialogHost: View {
+    let modal: Modal
+
+    var body: some View {
+        switch modal {
+        case .newAsset(let code):
+            AssetEditorSheet(mode: .new(categoryCode: code))
+        case .renameAsset(let asset):
+            AssetEditorSheet(mode: .rename(asset))
+        case .adjustBalance(let asset):
+            AssetEditorSheet(mode: .balance(asset))
+        case .correctHistory(let record, let name):
+            HistoryCorrectionSheet(history: record, assetName: name)
+        case .newSubscription:
+            SubscriptionEditorSheet(mode: .new)
+        case .editSubscription(let record):
+            SubscriptionEditorSheet(mode: .edit(record))
+        }
     }
 }

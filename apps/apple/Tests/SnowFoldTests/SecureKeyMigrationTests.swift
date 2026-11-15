@@ -122,12 +122,12 @@ final class SecureKeyMigrationTests: XCTestCase {
         ))
         XCTAssertThrowsError(try open(failing).exportSealed()) {
             XCTAssertEqual($0 as? CoreError, .KeyUnavailable)
-            XCTAssertEqual(Copy.userMessage(for: $0), "本机密钥已失效，请用恢复码恢复")
+            XCTAssertEqual(Copy.userMessage(for: $0), Copy.keyUnavailableHelp) // copy.md startup_key_unavailable
         }
         let store = SnowFoldStore(dataDirectory: directory, keyStore: failing)
         await store.open()
         XCTAssertEqual(store.state, .ready)
-        XCTAssertEqual(store.notice, "本机密钥已失效，请用恢复码恢复")
+        XCTAssertEqual(store.notice, Copy.keyUnavailableHelp)
         XCTAssertNil(try keyStore.load())
         XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
     }

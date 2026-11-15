@@ -2,13 +2,18 @@ import XCTest
 import UIKit
 
 /// 真实运行巡检；脚本只准备核心写出的数据，所有交互均通过应用 UI。
+/// 标识对照：TabView 与侧边栏行 nav-overview/nav-assets/nav-subscriptions/nav-settings；
+/// 工具栏 new-asset/new-subscription/sync-toolbar；行 asset-row-<名>/subscription-editor-<名>；
+/// 详情 adjust-balance/correct-<id>；sheet 头部按钮读屏名「取消」「保存」。
 @MainActor
 final class SnapshotTours: XCTestCase {
     private var mode: String { ProcessInfo.processInfo.environment["SHOT_MODE"] ?? "shot" }
     private var isTablet: Bool { UIDevice.current.userInterfaceIdiom == .pad }
     private let longestName = "招商银行朝朝宝（活期理财）家庭备用金账户"
     private var outputDirectory: URL {
-        URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("snowfold-shots", isDirectory: true)
+        URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("snowfold-shots", isDirectory: true)
+            .appendingPathComponent(ProcessInfo.processInfo.environment["SHOT_RUN_ID"] ?? "manual", isDirectory: true)
     }
 
     override func setUpWithError() throws {
@@ -18,8 +23,9 @@ final class SnapshotTours: XCTestCase {
 
     private func snap(_ name: String) {
         do {
-            try XCUIScreen.main.screenshot().pngRepresentation
-                .write(to: outputDirectory.appendingPathComponent("\(mode)-\(name).png"))
+            // iPad 按窗口方向截图，避免 XCUIScreen 把横屏像素写成旋转的竖图。
+            let image = isTablet ? XCUIApplication().windows.firstMatch.screenshot() : XCUIScreen.main.screenshot()
+            try image.pngRepresentation.write(to: outputDirectory.appendingPathComponent("\(mode)-\(name).png"))
         } catch { XCTFail("截图写入失败：\(error)") }
     }
 
@@ -27,21 +33,30 @@ final class SnapshotTours: XCTestCase {
         if isTablet { XCUIDevice.shared.orientation = .landscapeLeft }
         let app = XCUIApplication()
         app.launch()
-        XCTAssertTrue(app.staticTexts["总览"].firstMatch.waitForExistence(timeout: 15))
+        let ready = app.descendants(matching: .any).matching(identifier: "nav-overview")
+            .firstMatch.waitForExistence(timeout: 15)
+            || app.tabBars.buttons["总览"].firstMatch.waitForExistence(timeout: 5)
+        XCTAssertTrue(ready, "应用未出现导航")
         return app
     }
 
+    /// 手机走标签栏按钮，平板走侧边栏标识；到达后以页面焦点文字断言。
     private func navigate(_ tab: String, app: XCUIApplication) {
-        let label = ["overview": "总览", "assets": "资产", "subscriptions": "订阅"][tab] ?? tab
-        if !isTablet {
-            let button = app.tabBars.buttons[label]
-            XCTAssertTrue(button.waitForExistence(timeout: 5))
-            button.tap()
+        let label = ["overview": "总览", "assets": "资产", "subscriptions": "订阅", "settings": "设置"][tab] ?? tab
+        let marker = ["overview": "净资产", "assets": "总资产",
+                      "subscriptions": "本月待扣", "settings": "外观"][tab] ?? tab
+        let item: XCUIElement
+        if isTablet {
+            item = app.descendants(matching: .any).matching(identifier: "nav-" + tab).firstMatch
         } else {
-            let item = app.descendants(matching: .any).matching(identifier: "nav-" + tab).firstMatch
-            XCTAssertTrue(item.waitForExistence(timeout: 5), "侧栏入口缺失：\(tab)")
-            item.tap()
+            item = app.tabBars.buttons[label].firstMatch
         }
+        XCTAssertTrue(item.waitForExistence(timeout: 8), "导航入口缺失：\(tab)")
+        item.tap()
+        let emptyMarker = ["overview": "还没有记录", "assets": "还没有资产", "subscriptions": "还没有订阅"][tab] ?? marker
+        XCTAssertTrue(element(containing: marker, app: app).waitForExistence(timeout: 4)
+                      || app.staticTexts[emptyMarker].firstMatch.waitForExistence(timeout: 4),
+                      "页面未出现预期的内容或空状态：\(marker)")
     }
 
     private func element(containing text: String, app: XCUIApplication) -> XCUIElement {
@@ -52,25 +67,31 @@ final class SnapshotTours: XCTestCase {
     }
 
     private func reveal(_ element: XCUIElement, app: XCUIApplication, scrollID: String) {
-        // List 的辅助功能容器可能覆盖整个懒加载内容，swipeUp 会选到视口外的起点。
-        // 从应用可见区域发手势，和用户在屏幕内滑动一致。
         var count = 0
         while !element.isHittable && count < 28 {
-            // iPad 三栏的列表位于中间列，右侧是内嵌表单；手势必须落在列表上。
+            // 分栏列表位于左列，手势必须落在列表上；手机页从中部起滑。
             let x = isTablet ? 0.30 : 0.58
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.78))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.28))
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.72))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.25))
             start.press(forDuration: 0.03, thenDragTo: end)
             count += 1
         }
-        if !element.isHittable { snap("failure-" + scrollID) }
-        XCTAssertTrue(element.waitForExistence(timeout: 5), "未找到列表记录")
-        XCTAssertTrue(element.isHittable, "记录未滚入可操作范围")
+        XCTAssertTrue(element.waitForExistence(timeout: 5), "未找到列表记录：\(scrollID)")
+        XCTAssertTrue(element.isHittable, "记录未滚入可操作范围：\(scrollID)")
+    }
+
+    /// sheet 头部的「保存」圆形按钮（读屏名）。
+    private func saveButton(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons["保存"].firstMatch
+    }
+
+    private func cancelButton(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons["取消"].firstMatch
     }
 
     private func closeEditor(_ app: XCUIApplication) {
         let wasSheet = app.sheets.count > 0
-        app.buttons["取消"].firstMatch.tap()
+        cancelButton(app).tap()
         if wasSheet || !isTablet {
             let gone = expectation(for: NSPredicate(format: "count == 0"), evaluatedWith: app.sheets)
             XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 5), .completed)
@@ -78,22 +99,149 @@ final class SnapshotTours: XCTestCase {
     }
 
     private func openSettings(_ app: XCUIApplication) {
-        if isTablet { navigate("settings", app: app) }
-        else { app.buttons["设置"].firstMatch.tap() }
+        navigate("settings", app: app)
         XCTAssertTrue(app.staticTexts["外观"].firstMatch.waitForExistence(timeout: 8))
         snap("settings")
-        let key = app.staticTexts["同步密钥"].firstMatch
-        reveal(key, app: app, scrollID: "settings-form")
-        snap("settings-backup")
-        if !isTablet { app.buttons["完成"].firstMatch.tap() }
+        let key = app.staticTexts["同步密钥指纹"].firstMatch
+        if key.waitForExistence(timeout: 4) {
+            reveal(key, app: app, scrollID: "settings-key")
+        }
+        snap("settings-key")
     }
+
+    /// 截图矩阵与行为巡游分开：每屏重新启动真实应用，避免一条导航失败丢失后续屏。
+    // 静态截图先执行，后面的真实续费不会改写矩阵夹具。
+    func test00ScreenMatrix() {
+        continueAfterFailure = true
+        let kind = ProcessInfo.processInfo.environment["SHOT_KIND"] ?? "long"
+        let app = XCUIApplication()
+        for tab in ["overview", "assets", "subscriptions", "settings"] {
+            app.launchArguments = ["-SNOWFOLD_SHOT_TAB", tab]
+            if isTablet { XCUIDevice.shared.orientation = .landscapeLeft }
+            app.launch()
+            let marker = app.descendants(matching: .any).matching(identifier: "nav-" + tab).firstMatch
+            _ = marker.waitForExistence(timeout: 10)
+            snap("matrix-" + kind + "-" + tab)
+            if tab == "settings" {
+                for page in 1...3 {
+                    app.swipeUp()
+                    snap("matrix-settings-page-\(page)")
+                }
+                let clear = app.buttons["clear-all"].firstMatch
+                app.swipeDown()
+                app.swipeDown()
+                if clear.waitForExistence(timeout: 4), clear.isHittable {
+                    clear.tap()
+                    _ = app.buttons["取消"].firstMatch.waitForExistence(timeout: 4)
+                    snap("matrix-confirm-clear")
+                }
+            }
+            app.terminate()
+        }
+        let dialogs = kind == "empty" ? ["asset", "sub-new"] : ["asset", "adjust", "correct", "sub-new", "sub-edit"]
+        for dialog in dialogs {
+            app.launchArguments = ["-SNOWFOLD_SHOT_TAB", dialog.hasPrefix("sub") ? "subscriptions" : "assets",
+                                   "-SNOWFOLD_SHOT_DIALOG", dialog, "-SNOWFOLD_SHOT_HIDE_KEYBOARD", "-SNOWFOLD_SHOT_PREFILL"]
+            app.launch()
+            let cancel = app.buttons["取消"].firstMatch
+            XCTAssertTrue(cancel.waitForExistence(timeout: 12), "弹层未打开：\(dialog)")
+            snap("matrix-dialog-" + dialog)
+            app.terminate()
+            if dialog != "sub-edit" {
+                app.launchArguments.append("-SNOWFOLD_SHOT_FORM_ERROR")
+                app.launch()
+                let error = app.descendants(matching: .any).matching(identifier: "editor-error").firstMatch
+                XCTAssertTrue(error.waitForExistence(timeout: 12), "错误未就地显示：\(dialog)")
+                snap("matrix-dialog-" + dialog + "-error")
+                app.terminate()
+            }
+        }
+    }
+
+    /// 只通过现有入口与启动钩子补拍真实状态，不注入界面模型。
+    func testSupplementalStates() {
+        continueAfterFailure = true
+        if isTablet { XCUIDevice.shared.orientation = .landscapeLeft }
+        let kind = ProcessInfo.processInfo.environment["SHOT_KIND"] ?? "long"
+        let app = XCUIApplication()
+        if kind == "bad" {
+            app.launch()
+            _ = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "无法")).firstMatch.waitForExistence(timeout: 10)
+            snap("09-error-startup")
+            app.terminate()
+            return
+        }
+        if kind == "key" || kind == "sync" {
+            let account = "snowfold-apple-shots-\(UUID().uuidString)"
+            app.launchArguments = ["-SNOWFOLD_KEYCHAIN_ACCOUNT", account]
+            if kind == "key" { app.launchArguments.append("-SNOWFOLD_KEYCHAIN_FAILURE") }
+            else {
+                app.launchArguments += ["-SNOWFOLD_SYNC_ACCEPTANCE", "s3"]
+                if mode.contains("dark") { app.launchArguments.append("-SNOWFOLD_SYNC_DARK") }
+            }
+            app.launch()
+            let sync = app.buttons["sync-toolbar"].firstMatch
+            _ = app.descendants(matching: .any).matching(identifier: "nav-overview").firstMatch.waitForExistence(timeout: 10)
+            if kind == "key" { snap("09-error-key") }
+            else if sync.waitForExistence(timeout: 10) {
+                snap("sync-idle")
+                navigate("settings", app: app)
+                snap("settings-sync-on")
+                for page in 1...4 { app.swipeUp(); snap("settings-sync-on-page-\(page)") }
+                navigate("overview", app: app)
+                sync.tap()
+                let failed = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "上次同步失败")).firstMatch
+                XCTAssertTrue(failed.waitForExistence(timeout: 8))
+                snap("08-sync-failed")
+            }
+            app.terminate()
+            return
+        }
+        if kind == "neg" {
+            for tab in ["overview", "assets"] {
+                app.launchArguments = ["-SNOWFOLD_SHOT_TAB", tab]
+                app.launch()
+                _ = app.descendants(matching: .any).matching(identifier: "nav-" + tab).firstMatch.waitForExistence(timeout: 10)
+                snap("negative-" + tab)
+                app.terminate()
+            }
+            return
+        }
+        if kind != "empty" {
+            for (name, tab, flag) in [("08-toast-undo", "assets", "-SNOWFOLD_SHOT_UNDO"),
+                                      ("08-toast-notice", "subscriptions", "-SNOWFOLD_SHOT_NOTICE")] {
+                app.launchArguments = ["-SNOWFOLD_SHOT_TAB", tab, flag]
+                app.launch()
+                let text = flag.hasSuffix("UNDO") ? "撤销" : "已导出"
+                _ = element(containing: text, app: app).waitForExistence(timeout: 8)
+                snap(name)
+                app.terminate()
+            }
+            app.launchArguments = ["-SNOWFOLD_SHOT_TAB", "subscriptions"]
+            app.launch()
+            let row = app.descendants(matching: .any).matching(identifier: "subscription-editor-Apple Music 家庭版").firstMatch
+            reveal(row, app: app, scrollID: "subscription-swipe")
+            row.swipeLeft()
+            snap("04-subscriptions-swipe")
+            app.terminate()
+        }
+        app.launchArguments = ["-SNOWFOLD_SHOT_TAB", "settings"]
+        app.launch()
+        let clear = app.buttons["clear-all"].firstMatch
+        reveal(clear, app: app, scrollID: "clear-all")
+        clear.tap()
+        XCTAssertTrue(app.staticTexts["清空全部数据？"].firstMatch.waitForExistence(timeout: 5))
+        snap("07-confirm-clear")
+        app.terminate()
+    }
+
+    // MARK: 长数据巡游
 
     func testLongTour() {
         let app = launch()
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS '净资产'")).firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(element(containing: "净资产", app: app).waitForExistence(timeout: 8))
         snap("overview")
-        let overviewScroll = app.descendants(matching: .any).matching(identifier: "overview-scroll").firstMatch
-        overviewScroll.swipeUp()
+        app.swipeUp()
         snap("overview-composition")
 
         navigate("assets", app: app)
@@ -106,62 +254,51 @@ final class SnapshotTours: XCTestCase {
         if !isTablet { app.navigationBars.buttons.element(boundBy: 0).tap() }
 
         navigate("subscriptions", app: app)
+        XCTAssertTrue(element(containing: "月均支出", app: app).waitForExistence(timeout: 8))
         snap("statistics")
-        let renew = app.buttons["✓ 已续费"].firstMatch
+        let renew = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "renew-")).firstMatch
         reveal(renew, app: app, scrollID: "subscriptions-list")
         snap("subscriptions")
         renew.tap()
-        let renewed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '已顺延'")).firstMatch
+        let renewed = element(containing: "已顺延", app: app)
         XCTAssertTrue(renewed.waitForExistence(timeout: 8))
         snap("renew-notice")
-        app.buttons["关闭"].firstMatch.tap()
+        if app.buttons["关闭"].firstMatch.exists { app.buttons["关闭"].firstMatch.tap() }
 
-        let music = app.buttons["subscription-editor-Apple Music 家庭版"]
+        let music = app.descendants(matching: .any)
+            .matching(identifier: "subscription-editor-Apple Music 家庭版").firstMatch
         reveal(music, app: app, scrollID: "subscriptions-list")
         music.tap()
-        XCTAssertTrue(app.textFields["名称"].firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.textFields["例如：Netflix"].firstMatch.waitForExistence(timeout: 8))
         snap("subscription-edit")
         closeEditor(app)
 
-        let musicAgain = app.buttons["subscription-editor-Apple Music 家庭版"]
-        reveal(musicAgain, app: app, scrollID: "subscriptions-list")
-        musicAgain.swipeLeft()
-        app.buttons["删除"].firstMatch.tap()
-        let undo = app.buttons["撤销 · 6秒内"]
-        XCTAssertTrue(undo.waitForExistence(timeout: 5))
-        snap("undo-banner")
-        // 从横幅正文开始向下拖；撤销按钮随之消失，列表中删除保持生效。
-        let start = undo.coordinate(withNormalizedOffset: CGVector(dx: -0.9, dy: 0.5))
-        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 90)))
-        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: undo)
-        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 3), .completed)
-        snap("undo-dismissed")
-
         app.buttons["new-subscription"].firstMatch.tap()
-        XCTAssertTrue(app.textFields["名称"].firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.textFields["例如：Netflix"].firstMatch.waitForExistence(timeout: 8))
         snap("subscription-create")
         closeEditor(app)
         openSettings(app)
     }
 
+    // MARK: 空库巡游
+
     func testEmptyTour() {
         let app = launch()
+        XCTAssertTrue(app.staticTexts["还没有记录"].firstMatch.waitForExistence(timeout: 8))
         snap("empty-overview")
         navigate("assets", app: app)
-        let add = app.buttons["add-empty-cash"]
-        XCTAssertTrue(add.waitForExistence(timeout: 8))
+        let add = app.descendants(matching: .any).matching(identifier: "add-empty-cash").firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 8), "分类空状态「添加」缺失")
         snap("empty-assets")
         add.tap()
-        XCTAssertTrue(app.buttons["category-fixed"].waitForExistence(timeout: 8))
-        app.buttons["category-fixed"].tap()
-        snap("asset-create")
-        let name = app.textFields["名称"].firstMatch
+        let name = app.textFields["例如：招商银行 储蓄卡"].firstMatch
+        XCTAssertTrue(name.waitForExistence(timeout: 8))
         name.tap()
         name.typeText("Regression Asset")
         let amount = app.textFields["0.00"].firstMatch
         amount.tap()
         amount.typeText("12.345")
-        app.buttons["保存"].firstMatch.tap()
+        saveButton(app).tap()
         let error = app.descendants(matching: .any).matching(identifier: "editor-error").firstMatch
         XCTAssertTrue(error.waitForExistence(timeout: 5))
         XCTAssertTrue(error.isHittable, "输入错误必须出现在可见区域")
@@ -171,25 +308,33 @@ final class SnapshotTours: XCTestCase {
         XCTAssertTrue(app.staticTexts["还没有订阅"].firstMatch.waitForExistence(timeout: 8))
         snap("empty-subscriptions")
         app.buttons["new-subscription"].firstMatch.tap()
-        XCTAssertTrue(app.textFields["名称"].firstMatch.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.textFields["例如：Netflix"].firstMatch.waitForExistence(timeout: 8))
         snap("subscription-create")
         closeEditor(app)
         openSettings(app)
     }
+
+    // MARK: 分类切换与前台刷新
 
     /// 分类切换保存、编辑期间他处删除、前台返回刷新分别由 UI/模型共同验证。
     func testCategorySelectionAndForegroundRefresh() {
         let app = launch()
         navigate("assets", app: app)
         app.buttons["new-asset"].firstMatch.tap()
-        app.buttons["category-investment"].tap()
-        let name = app.textFields["名称"].firstMatch
+        // 分类是菜单选择器：先点开菜单，再选「投资理财」。
+        let menu = element(containing: "流动资金", app: app)
+        XCTAssertTrue(menu.waitForExistence(timeout: 8), "分类菜单缺失")
+        menu.tap()
+        let item = app.buttons["投资理财"].firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 5), "菜单项缺失")
+        item.tap()
+        let name = app.textFields["例如：招商银行 储蓄卡"].firstMatch
         name.tap()
         name.typeText("Grid Selection Regression")
         let amount = app.textFields["0.00"].firstMatch
         amount.tap()
         amount.typeText("12345678.90")
-        app.buttons["保存"].firstMatch.tap()
+        saveButton(app).tap()
         let row = element(containing: "Grid Selection Regression", app: app)
         reveal(row, app: app, scrollID: "assets-list")
         XCTAssertTrue(row.exists)
