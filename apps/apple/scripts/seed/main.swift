@@ -34,6 +34,22 @@ if arguments.contains("--hero") {
     exit(0)
 }
 
+// 负净资产回归用：负债压过资产，净资产恰为 −¥1,234,567.89（docs/design.md §2 负数焦点金额）。
+if arguments.contains("--neg") {
+    _ = try core.createAsset(categoryCode: "cash", assetName: "活期存款", amountCents: 100_000_000)
+    _ = try core.createAsset(categoryCode: "investment", assetName: "基金定投账户", amountCents: 50_000_000)
+    _ = try core.createAsset(categoryCode: "debt", assetName: "房贷（等额本息）", amountCents: 244_567_789)
+    _ = try core.createAsset(categoryCode: "debt", assetName: "车贷剩余本金", amountCents: 28_889_000)
+    let spec: (String, Int64, String, String, String) = ("云服务年费", 12_000, "CNY", "yearly", shift(days: -3))
+    _ = try core.createSubscription(subscription: SubscriptionInput(
+        name: spec.0, amountCents: spec.1, currency: spec.2, cycle: spec.3, nextChargeOn: spec.4, status: "active"))
+    try core.saveTheme(theme: .system)
+    let overview = try core.overview(on: dayString(Date()))
+    precondition(overview.netAssetsCents == -123_456_789, "负净资产样例与验收金额不符")
+    print("neg seeded: net \(overview.netAssetsCents) cents")
+    exit(0)
+}
+
 // 资产（5 分类共 15 条；金额走核心解析口径，直接整数分）。
 let assetSpecs: [(String, String, Int64)] = [
     ("cash", "招商银行朝朝宝（活期理财）家庭备用金账户", 1_234_567_890),
@@ -56,10 +72,15 @@ for (category, name, cents) in assetSpecs {
     _ = try core.createAsset(categoryCode: category, assetName: name, amountCents: cents)
 }
 
-// 额外 20 项，合计 35 资产 + 13 订阅，真实长列表超过 30 条。
-for index in 1...20 {
-    let category = ["cash", "fixed", "investment", "receivable", "debt"][(index - 1) % 5]
-    _ = try core.createAsset(categoryCode: category, assetName: "家庭长期规划账户 · 第 \(index) 项", amountCents: 10_000 + Int64(index) * 125)
+// 长数据：24 字名称、¥9,999,999,999.99，每个分类补至 12 项。
+_ = try core.createAsset(categoryCode: "cash", assetName: "家庭共同财务长期规划专用储蓄理财备用资金账户记录", amountCents: 999_999_999_999)
+for category in ["cash", "fixed", "investment", "receivable", "debt"] {
+    let existingCount = try core.data().assets.filter { $0.categoryCode == category }.count
+    if existingCount < 12 {
+        for index in (existingCount + 1)...12 {
+            _ = try core.createAsset(categoryCode: category, assetName: "家庭长期规划账户 · 第 \(index) 项", amountCents: 10_000 + Int64(index) * 125)
+        }
+    }
 }
 
 // 余额变动：追加历史快照。
@@ -112,8 +133,20 @@ for (name, cents, currency, cycle, next) in subscriptionSpecs {
     }
 }
 
+// 补至 30 个订阅（人民币与美元混合，含暂停与待确认）。
+for index in 14...30 {
+    _ = try core.createSubscription(subscription: SubscriptionInput(
+        name: "家庭订阅服务长期规划项目第 \(index) 项", amountCents: index == 14 ? 99_999_999 : Int64(index) * 199,
+        currency: index.isMultiple(of: 3) ? "USD" : "CNY", cycle: "monthly",
+        nextChargeOn: shift(days: index - 16), status: index.isMultiple(of: 7) ? "paused" : "active"))
+}
+let finalData = try core.data()
+precondition(finalData.assets.count == 60)
+precondition(finalData.subscriptions.count == 30)
+
 // 本机主题与密钥：让截图与真实使用一致。
 try core.saveTheme(theme: .system)
-_ = try core.exportSealed()
+// CI 临时签名可能没有钥匙串写权限；造数不依赖同步密钥，导出失败不阻断。
+_ = try? core.exportSealed()
 let overview = try core.overview(on: dayString(Date()))
 print("seeded: \(overview.totalAssetsCents) cents assets, \(overview.activeSubscriptions) active subs, \(overview.pausedSubscriptions) paused")

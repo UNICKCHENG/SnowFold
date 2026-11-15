@@ -41,6 +41,11 @@ final class SyncSnapshotTests: XCTestCase {
 
     private func positionSyncForm(_ app: XCUIApplication) {
         let endpoint = app.textFields["sync-endpoint"]
+        // 新版设置：已配置时表单收在「存储 · 修改」里，点开后再定位字段。
+        if !endpoint.exists {
+            let edit = app.buttons["sync-edit"].firstMatch
+            if edit.waitForExistence(timeout: 5) { edit.tap() }
+        }
         reveal(endpoint, app: app)
         let target = isTablet ? 280.0 : 270.0
         let distance = max(0, endpoint.frame.minY - target)

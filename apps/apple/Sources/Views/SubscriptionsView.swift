@@ -1,133 +1,128 @@
 import SwiftUI
 
-/// 订阅：统计卡（本月待扣/月均/年化/下一笔）、五个分组、行操作。
+/// 订阅：统计头（本月待扣焦点）、五个分组、行操作（§9.4 / mobile §4）。
 struct SubscriptionsView: View {
     @Environment(SnowFoldStore.self) private var store
-    var onEdit: ((SubscriptionRecord) -> Void)? = nil
-    var onNew: (() -> Void)? = nil
-    @State private var editorTarget: EditorTarget?
-    @State private var renewFeedback = 0
+    @Environment(Router.self) private var router
     @Environment(\.dynamicTypeSize) private var typeSize
-
-    enum EditorTarget: Identifiable {
-        case new
-        case edit(SubscriptionRecord)
-        var id: String {
-            switch self {
-            case .new: return "new"
-            case .edit(let record): return record.id
-            }
-        }
-    }
+    @State private var renewFeedback = 0
 
     var body: some View {
-        List {
+        ScrollView {
             if store.ledger.subscriptions.isEmpty {
-                Section {
-                    EmptyStateView(
-                        icon: "calendar.badge.clock",
-                        title: Copy.noSubscriptions,
-                        message: Copy.noSubscriptionsHelp,
-                        actionTitle: Copy.newSubscription
-                    ) {
-                        openNew()
-                    }
-                    .listRowBackground(Color.clear)
-                }
+                EmptyStateView(
+                    icon: "ic-calendar-repeat",
+                    title: Copy.noSubscriptions,
+                    message: Copy.noSubscriptionsHelp,
+                    actionTitle: Copy.newSubscription,
+                    actionIcon: "ic-plus",
+                    action: { router.modal = .newSubscription }
+                )
+                .frame(minHeight: 480)
+                .padding(.top, 24)
             } else {
-                statsSection
-                if let pending = groupOrder.first(where: { $0.key == .overdue }), !pending.items.isEmpty {
-                    groupSection(pending)
-                }
-                annualChartSection
-                ForEach(groupOrder.filter { $0.key != .overdue && $0.key != .paused }, id: \.key) { group in
-                    if !group.items.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    statsHeader.padding(.bottom, 24)
+                    let groups = groupOrder
+                    if let pending = groups.first(where: { $0.key == .overdue }), !pending.items.isEmpty {
+                        groupSection(pending)
+                        Spacer(minLength: 24)
+                    }
+                    ForEach(groups.filter { $0.key != .overdue && $0.key != .paused && !$0.items.isEmpty },
+                            id: \.key) { group in
                         groupSection(group)
+                        Spacer(minLength: 24)
+                    }
+                    if let paused = groups.first(where: { $0.key == .paused }), !paused.items.isEmpty {
+                        groupSection(paused)
                     }
                 }
-                if let paused = groupOrder.first(where: { $0.key == .paused }), !paused.items.isEmpty {
-                    groupSection(paused)
-                }
+                .padding(.horizontal, Ds.isDesktop ? 0 : 16)
+                .padding(.top, Ds.isDesktop ? 0 : 8)
+                .padding(.bottom, 24)
             }
         }
-        .accessibilityIdentifier("subscriptions-list")
-        .animation(.default, value: store.ledger)
+        .background(Color.bg)
+        .navigationTitle(Copy.subscriptionsTitle)
+        .phoneInlineTitle()
+        .phoneToolbar { PageToolbarActions() }
         .sensoryFeedback(.success, trigger: store.highlightID)
         .sensoryFeedback(.success, trigger: renewFeedback)
-        .sensoryFeedback(.warning, trigger: store.undoState)
-        .scrollContentBackground(.hidden)
-        .background(Color.canvas)
-        .navigationTitle(Copy.subscriptionsTitle)
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.large)
-        #endif
-        .settingsToolbar {
-            Button { openNew() } label: { Label(Copy.newSubscription, systemImage: "plus").accessibilityIdentifier("new-subscription") }
-        }
-        .sheet(item: $editorTarget) { target in
-            switch target {
-            case .new:
-                SubscriptionEditorSheet(mode: .new)
-            case .edit(let record):
-                SubscriptionEditorSheet(mode: .edit(record))
+        .accessibilityIdentifier("subscriptions-list")
+    }
+
+    // MARK: 统计头（§4.1 / §9.4）
+
+    private var statsHeader: some View {
+        let totals = store.overview?.subscriptionTotals ?? []
+        let cnyDue = totals.first { $0.currency == "CNY" }?.dueThisMonthCents ?? 0
+        let usdDue = totals.first { $0.currency == "USD" }?.dueThisMonthCents ?? 0
+        let active = store.ledger.subscriptions.filter { $0.status == "active" }.count
+        let paused = store.ledger.subscriptions.count - active
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(Copy.dueThisMonth)
+                .font(Ds.bodyMedium())
+                .foregroundStyle(Color.text2)
+            FocusAmountText(cents: cnyDue, level: .page)
+            if usdDue > 0 {
+                Text(Copy.moreCurrency(Fmt.money(usdDue, "USD")))
+                    .font(Ds.body())
+                    .monospacedDigit()
+                    .foregroundStyle(Color.text2)
+                    .padding(.top, 4)
             }
-        }
-    }
-
-    private func openNew() {
-        if let onNew { onNew() } else { editorTarget = .new }
-    }
-
-    private func openEditor(_ record: SubscriptionRecord) {
-        if let onEdit { onEdit(record) } else { editorTarget = .edit(record) }
-    }
-
-    // MARK: 统计
-
-    private var statsSection: some View {
-        Section {
-            let totals = store.overview?.subscriptionTotals ?? []
-            let next = nextCharge
-            LazyVGrid(
-                columns: typeSize.isAccessibilitySize
-                    ? [GridItem(.flexible())]
-                    : [GridItem(.flexible()), GridItem(.flexible())],
-                spacing: 10
-            ) {
-                moneyStat(
-                    title: Copy.dueThisMonth,
-                    help: Copy.dueThisMonthHelp,
-                    cny: cny(totals, \.dueThisMonthCents),
-                    usd: usd(totals, \.dueThisMonthCents)
-                )
-                moneyStat(
-                    title: Copy.monthlySpending,
-                    help: Copy.monthlySpendingHelp,
-                    cny: cny(totals, \.monthlyCents),
-                    usd: usd(totals, \.monthlyCents)
-                )
-                moneyStat(
-                    title: Copy.annualSpending,
-                    help: Copy.annualSpendingHelp,
-                    cny: cny(totals, \.annualCents),
-                    usd: usd(totals, \.annualCents)
-                )
-                StatTile(title: Copy.nextCharge, help: Copy.nextCharge + " · " + Copy.dueThisMonthHelp) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(next.map { Fmt.day($0.nextChargeOn) } ?? Copy.emptySummary)
-                            .font(.headline)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                        Text(next?.name ?? Copy.noCharges)
-                            .font(.caption)
-                            .foregroundStyle(Color.inkMuted)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
+            if Ds.isDesktop && !typeSize.isAccessibilitySize {
+                HStack(alignment: .bottom, spacing: 40) {
+                    spendingStat(Copy.monthlySpending, cny(totals, \.monthlyCents), usd(totals, \.monthlyCents))
+                    spendingStat(Copy.annualSpending, cny(totals, \.annualCents), usd(totals, \.annualCents))
+                    Spacer(minLength: 0)
                 }
+                .padding(.top, 8)
+            } else if !typeSize.isAccessibilitySize {
+                HStack(alignment: .top, spacing: 24) {
+                    spendingStat(Copy.monthlySpending, cny(totals, \.monthlyCents), usd(totals, \.monthlyCents))
+                    spendingStat(Copy.annualSpending, cny(totals, \.annualCents), usd(totals, \.annualCents))
+                }
+                .padding(.top, 16)
+            } else {
+                spendingStat(Copy.monthlySpending, cny(totals, \.monthlyCents), usd(totals, \.monthlyCents))
+                    .padding(.top, 16)
+                spendingStat(Copy.annualSpending, cny(totals, \.annualCents), usd(totals, \.annualCents))
+                    .padding(.top, 12)
             }
-            .padding(.vertical, 4)
+            Text(paused > 0
+                 ? "\(active) 个在订 · \(paused) 个已暂停"
+                 : "\(active) 个在订")
+                .font(Ds.aux())
+                .monospacedDigit()
+                .foregroundStyle(Color.text2)
+                .padding(.top, 16)
+        }
+        .accessibilityIdentifier("subscriptions-stats")
+    }
+
+    /// 标签辅助 + info 16（口径说明）；值分区标题级；美元下一行辅助。
+    private func spendingStat(_ title: String, _ cny: Int64, _ usd: Int64) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(Ds.aux())
+                    .foregroundStyle(Color.text2)
+                HelpInfoButton(metricName: title, help: title == Copy.monthlySpending
+                               ? Copy.monthlySpendingHelp : Copy.annualSpendingHelp)
+            }
+            Text(Fmt.money(cny, "CNY"))
+                .font(Ds.sectionTitle())
+                .monospacedDigit()
+                .foregroundStyle(Color.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            if usd > 0 {
+                Text(Copy.moreCurrency(Fmt.money(usd, "USD")))
+                    .font(Ds.aux())
+                    .monospacedDigit()
+                    .foregroundStyle(Color.text2)
+            }
         }
     }
 
@@ -137,64 +132,6 @@ struct SubscriptionsView: View {
 
     private func usd(_ totals: [CurrencyTotal], _ pick: (CurrencyTotal) -> Int64) -> Int64 {
         totals.first { $0.currency == "USD" }.map(pick) ?? 0
-    }
-
-    private func moneyStat(title: String, help: String, cny: Int64, usd: Int64) -> some View {
-        StatTile(title: title, help: help) {
-            VStack(alignment: .leading, spacing: 2) {
-                MoneyText(cents: cny, currency: "CNY", font: .headline)
-                MoneyText(cents: usd, currency: "USD", font: .caption.weight(.medium), color: .ink)
-            }
-        }
-    }
-
-    /// 下一个扣费：在订、未逾期、最早的自然日（与桌面一致）。
-    private var nextCharge: SubscriptionRecord? { store.nextScheduledSubscription }
-
-    // MARK: 年化条形图
-
-    /// 年化金额来自核心 subscription_annual（store.annuals），界面不自算。
-    private var annualChartSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 14) {
-                let active = store.ledger.subscriptions.filter { $0.status == "active" }
-                let cnyItems = barItems(active, currency: "CNY")
-                let usdItems = barItems(active, currency: "USD")
-                if !cnyItems.isEmpty {
-                    chartCard(currency: "CNY", items: cnyItems)
-                }
-                if !usdItems.isEmpty {
-                    chartCard(currency: "USD", items: usdItems)
-                }
-                if cnyItems.isEmpty && usdItems.isEmpty {
-                    Text(Copy.noCharges)
-                        .font(.footnote)
-                        .foregroundStyle(Color.ink3)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 10)
-                }
-            }
-            .padding(.vertical, 6)
-        }
-    }
-
-    private func barItems(_ records: [SubscriptionRecord], currency: String) -> [AnnualBarItem] {
-        records
-            .filter { $0.currency == currency }
-            .map { AnnualBarItem(id: $0.id, name: $0.name, annualCents: store.annuals[$0.id] ?? 0) }
-            .sorted { $0.annualCents > $1.annualCents }
-            .prefix(8)
-            .map { $0 }
-    }
-
-    @ViewBuilder
-    private func chartCard(currency: String, items: [AnnualBarItem]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(currency == "USD" ? Copy.annualSpending + " · USD" : Copy.annualSpending + " · CNY")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(Color.inkMuted)
-            AnnualBarsChart(currency: currency, items: items)
-        }
     }
 
     // MARK: 分组
@@ -222,46 +159,57 @@ struct SubscriptionsView: View {
     }
 
     private func groupSection(_ group: GroupBucket) -> some View {
-        Section {
-            ForEach(group.items, id: \.id) { record in
-                subscriptionRow(record, group: group.key)
-                    .listRowBackground(Color.cardSurface)
-                    .listRowSeparatorTint(Color.hairline)
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(
+                title: group.name,
+                titleColor: group.key == .overdue ? .neg : .ink,
+                count: group.items.count,
+                countColor: group.key == .overdue ? .neg : .text2
+            ) {
+                EmptyView()
             }
-        } header: {
-            SectionHeader(title: group.name, count: group.items.count) {}
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 4, trailing: 16))
+            Card {
+                VStack(spacing: 0) {
+                    ForEach(Array(group.items.enumerated()), id: \.element.id) { index, record in
+                        if index > 0 { rowSeparator }
+                        subscriptionRow(record, group: group.key)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
         }
     }
+
+    private var rowSeparator: some View {
+        Rectangle().fill(Color.sep).frame(height: 1).padding(.leading, 16)
+    }
+
+    // MARK: 行
 
     private func subscriptionRow(_ record: SubscriptionRecord, group: SubscriptionGroup) -> some View {
         let pending = group == .overdue
         let active = record.status == "active"
-        return VStack(alignment: .leading, spacing: 10) {
-            Button {
-                openEditor(record)
-            } label: {
-                HStack(alignment: .top, spacing: 10) {
-                    avatar(for: record, overdue: pending)
-                    VStack(alignment: .leading, spacing: 5) {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        let main = layout {
+            Button { router.modal = .editSubscription(record) } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    SubscriptionAvatar(name: record.name, kind: pending ? .danger : (active ? .normal : .muted))
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(record.name)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Color.ink)
+                            .font(Ds.bodyMedium())
+                            .foregroundStyle(active ? Color.ink : Color.text2)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("\(Fmt.day(record.nextChargeOn)) · \(Copy.cycleLabel(record.cycle))")
-                            .font(.caption)
+                        Text(pending ? overdueSubtitle(record)
+                             : "\(Copy.cycleLabel(record.cycle)) · \(Fmt.day(record.nextChargeOn))")
+                            .font(Ds.aux())
                             .monospacedDigit()
-                            .foregroundStyle(Color.inkMuted)
-                        if pending {
-                            Text(Fmt.overdueCompact(record.nextChargeOn, today: Fmt.today))
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(Color.negativeBrand)
-                        }
+                            .foregroundStyle(pending ? Color.neg : Color.text2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -271,60 +219,103 @@ struct SubscriptionsView: View {
                 cycle: Copy.cycleLabel(record.cycle), date: Fmt.day(record.nextChargeOn),
                 status: active ? "在订" : "已暂停"
             ))
-            adaptiveAmounts(record, pending: pending)
-        }
-        .padding(.vertical, 7)
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive) {
-                Task { await store.deleteSubscription(id: record.id) }
-            } label: { Label("删除", systemImage: "trash") }
-        }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            Button {
-                Task { await store.setSubscriptionPaused(id: record.id, paused: active) }
-            } label: {
-                Label(active ? Copy.pause : Copy.resume, systemImage: active ? "pause.circle" : "play.circle")
+            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
+                MoneyText(cents: record.amountCents, currency: record.currency,
+                          font: Ds.bodyMedium(), color: active ? .ink : .text2)
+                if pending {
+                    Button { renew(record) } label: {
+                        HStack(spacing: 6) {
+                            AppIcon(name: "ic-check", size: 14)
+                            Text("已续费")
+                        }
+                    }
+                    .buttonStyle(SoftButtonStyle())
+                    .frame(minHeight: Ds.isDesktop ? 28 : 44)
+                    .accessibilityLabel(Copy.markRenewed)
+                    .accessibilityIdentifier("renew-" + record.id)
+                }
             }
-            .tint(.accentBrand)
+            if Ds.isDesktop && !pending { desktopActions(record, active: active) }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .frame(minHeight: Ds.doubleRowHeight)
+        .background(Color.cardBg)
         .contextMenu {
-            Button { openEditor(record) } label: { Label(Copy.editAction, systemImage: "pencil") }
-            if active && record.nextChargeOn <= Fmt.today {
-                Button { renew(record) } label: { Label(Copy.markRenewed, systemImage: "checkmark.circle.fill") }
-            }
+            Button { router.modal = .editSubscription(record) } label: { Label(Copy.editAction, image: "ic-info") }
             Button {
                 Task { await store.setSubscriptionPaused(id: record.id, paused: active) }
-            } label: {
-                Label(active ? Copy.pause : Copy.resume, systemImage: active ? "pause.circle" : "play.circle")
-            }
+            } label: { Label(active ? Copy.pause : Copy.resume, image: active ? "ic-pause" : "ic-play") }
             Button(role: .destructive) {
                 Task { await store.deleteSubscription(id: record.id) }
-            } label: { Label("删除", systemImage: "trash") }
+            } label: { Label(Copy.delete, image: "ic-trash") }
         }
-        .listRowBackground(store.highlightID == record.id ? Color.accentSoft : Color.cardSurface)
         .disabled(store.isWorking)
+        return Group {
+            if Ds.isDesktop { main }
+            else {
+                SwipeableRow(specs: mobileSwipeSpecs(record, pending: pending, active: active)) { main }
+            }
+        }
     }
 
-    private func adaptiveAmounts(_ record: SubscriptionRecord, pending: Bool) -> some View {
-        let layout = typeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
-            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
-        return layout {
-            MoneyText(cents: record.amountCents, currency: record.currency, font: .subheadline.weight(.semibold))
-            if pending {
-                if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                Button { renew(record) } label: {
-                    Text(Copy.markRenewed)
-                        .font(.footnote.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 44)
-                        .background(Color.accentSoft, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.accentBrand)
-                .accessibilityIdentifier("renew-" + record.id)
-            }
+    /// 待确认行副标题：逾期 {n} 天 · {周期} · {日期}，整行 neg（设计稿如此）。
+    private func overdueSubtitle(_ record: SubscriptionRecord) -> String {
+        var parts: [String] = []
+        if let days = Fmt.daysBetween(Fmt.today, record.nextChargeOn), days < 0 {
+            parts.append("逾期 \(-days) 天")
         }
+        parts.append(Copy.cycleLabel(record.cycle))
+        parts.append(Fmt.day(record.nextChargeOn))
+        return parts.joined(separator: " · ")
+    }
+
+    /// 移动左滑：待确认行「已续费」（brand）+「删除」（neg）；其余「暂停/恢复」+「删除」。
+    private func mobileSwipeSpecs(_ record: SubscriptionRecord, pending: Bool, active: Bool) -> [SwipeActionSpec] {
+        var specs: [SwipeActionSpec] = []
+        if pending {
+            specs.append(SwipeActionSpec(icon: "ic-check", title: Copy.markRenewed, tint: .brand) {
+                renew(record)
+            })
+        } else {
+            specs.append(SwipeActionSpec(icon: active ? "ic-pause" : "ic-play",
+                                         title: active ? Copy.pause : Copy.resume, tint: .brand) {
+                Task { await store.setSubscriptionPaused(id: record.id, paused: active) }
+            })
+        }
+        specs.append(SwipeActionSpec(icon: "ic-trash", title: Copy.delete) {
+            Task { await store.deleteSubscription(id: record.id) }
+        })
+        return specs
+    }
+
+    /// 桌面悬停动作列：暂停/恢复 与 删除（宽 88，图标 20）。
+    private func desktopActions(_ record: SubscriptionRecord, active: Bool) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                Task { await store.setSubscriptionPaused(id: record.id, paused: active) }
+            } label: {
+                AppIcon(name: active ? "ic-pause" : "ic-play", size: 18)
+                    .foregroundStyle(Color.text2)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(active ? Copy.pause : Copy.resume)
+            .help(active ? Copy.pause : Copy.resume)
+            Button {
+                Task { await store.deleteSubscription(id: record.id) }
+            } label: {
+                AppIcon(name: "ic-trash", size: 18)
+                    .foregroundStyle(Color.text2)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Copy.delete)
+        }
+        .frame(width: 88)
+        .opacity(0.72)
     }
 
     private func renew(_ record: SubscriptionRecord) {
@@ -334,18 +325,5 @@ struct SubscriptionsView: View {
                 renewFeedback += 1
             }
         }
-    }
-
-    private func avatar(for record: SubscriptionRecord, overdue: Bool) -> some View {
-        let initial = record.name.first.map { String($0).uppercased() } ?? "?"
-        return Text(initial)
-            .font(.subheadline.weight(.semibold))
-            .frame(width: 34, height: 34)
-            .background(
-                overdue ? Color.negativeSoft : Color.tabsBg,
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
-            .foregroundStyle(overdue ? .negativeBrand : .secondary)
-            .accessibilityHidden(true)
     }
 }

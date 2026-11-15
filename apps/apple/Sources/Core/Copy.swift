@@ -1,7 +1,7 @@
 import Foundation
 
 /// 全部用户可见文案与 CoreError → 中文提示的映射。
-/// 来源：docs/copy.md（冻结）与事实板「文案修正」；宿主按错误枚举映射，不使用 Rust Display。
+/// 来源：docs/copy.md（冻结，含「界面重做新增」一节）；宿主按错误枚举映射，不使用 Rust Display。
 enum Copy {
     // MARK: 错误映射
 
@@ -37,12 +37,13 @@ enum Copy {
         }
     }
 
-    /// 用户提示单独处理安全存储失败；枚举诊断映射保留兼容。
-    static let secureKeyUnavailable = "本机密钥已失效，请用恢复码恢复"
+    /// 密钥卡片正文（startup_key_unavailable，不再拼 {detail}，避免与标题重复）。
+    static let keyUnavailableHelp =
+        "请检查密钥文件或导入恢复码。加密备份暂时无法导出或导入；可以在设置里导入恢复码，或处理密钥文件后重启。"
     static let keyLocation = "密钥存放在系统钥匙串"
 
     static func userMessage(for error: Error) -> String {
-        if error as? CoreError == .KeyUnavailable { return secureKeyUnavailable }
+        if error as? CoreError == .KeyUnavailable { return keyUnavailableHelp }
         return message(for: error)
     }
 
@@ -56,25 +57,33 @@ enum Copy {
         "启动备份失败：\(detail)。原数据未改变，请检查数据目录权限。"
     }
 
-    static func startupKeyUnavailable(_ detail: String) -> String {
-        secureKeyUnavailable
-    }
+    static let startupErrorTitle = "无法打开数据"
+    static let keyUnavailableTitle = "同步密钥不可用"
+    /// 兼容旧调用点（Store.swift 启动通知）。
+    static func startupKeyUnavailable(_ detail: String) -> String { keyUnavailableHelp }
 
     // MARK: 页面与统计
 
     static let overviewTitle = "总览"
+    static let assetsTab = "资产"
     static let assetsTitle = "资产与负债"
     static let subscriptionsTitle = "订阅"
     static let settingsTitle = "设置"
     static let newSubscriptionTitle = "新建订阅"
-    static let settingsThemeHeader = "外观"
+    static let editSubscriptionTitle = "编辑订阅"
+    static let settingsAppearanceHeader = "外观"
     static let settingsDataHeader = "数据"
     static let settingsEncryptedHeader = "加密备份"
     static let settingsAboutHeader = "关于"
+    static let settingsTabGeneral = "通用"
+    static let settingsTabData = "数据"
+    static let settingsTabSecuritySync = "加密与同步"
+    static let settingsTabAbout = "关于"
     static let netAssets = "净资产"
     static let totalAssets = "总资产"
     static let totalDebt = "总负债"
     static let debtRatio = "负债率"
+    static let recordsLabel = "记录"
     static let assetComposition = "资产构成"
     static let allDetails = "全部明细"
     static let upcomingCharges = "即将扣费"
@@ -82,14 +91,12 @@ enum Copy {
     static let dueThisMonth = "本月待扣"
     static let monthlySpending = "月均支出"
     static let annualSpending = "年化支出"
-    // 事实板「文案修正」：年化＝按扣费周期折算为全年支出；月均＝年化合计 ÷ 12 后舍入。
     static let dueThisMonthHelp = "在用订阅中，下次扣费日落在当前自然月的金额合计（含本月已过期、待确认的）"
-    static let monthlySpendingHelp = "按扣费周期折算为全年支出后除以 12 舍入到分"
+    static let monthlySpendingHelp = "月均为年化合计 ÷ 12 后舍入"
     static let annualSpendingHelp = "按扣费周期折算为全年支出"
     static let nextCharge = "下一个扣费"
-    /// 「接下来」卡里的第二币种前缀：另有 $25.80（docs/mobile-layout.md §2.2）
-    static let amountAdditional = "另有"
-    static let historyTitle = "变动记录 · 修正不会新增快照"
+    static let historySection = "变动记录"
+    static let historyNote = "修正不会新增快照"
     static let historyCurrent = "当前"
     static let historyInitial = "初始"
 
@@ -101,8 +108,8 @@ enum Copy {
         "\(count) 项记录 · 5 个固定分类"
     }
 
-    static func subscriptionsSubtitle(active: Int, paused: Int) -> String {
-        paused > 0 ? "\(active) 个在订 · \(paused) 个已暂停" : "\(active) 个在订"
+    static func itemCount(_ count: Int) -> String {
+        "\(count) 项"
     }
 
     /// 总览订阅摘要：逾期优先，其次下一笔，最后仅数量。
@@ -111,6 +118,15 @@ enum Copy {
         if overdue > 0 { return "\(active) 个订阅 · \(overdue) 笔待确认" }
         if let nextDate { return "\(active) 个订阅 · 下一笔 \(nextDate)" }
         return "\(active) 个订阅"
+    }
+
+    static func assetMeta(date: String, historyCount: Int) -> String {
+        "更新于 \(date) · 历史 \(historyCount) 条"
+    }
+
+    /// 美元补充行：+ $332.97（只有符号与金额，不含汉字）。
+    static func moreCurrency(_ amount: String) -> String {
+        "+ \(amount)"
     }
 
     // MARK: 分类、选项与周期
@@ -126,6 +142,11 @@ enum Copy {
 
     static func categoryName(_ code: String) -> String {
         categoryNames[code] ?? code
+    }
+
+    /// 分类空状态：暂无{分类}。
+    static func categoryEmpty(_ code: String) -> String {
+        "暂无\(categoryName(code))"
     }
 
     static let currencyCNY = "¥ 人民币"
@@ -158,6 +179,24 @@ enum Copy {
         }
     }
 
+    // MARK: 字段
+
+    static let nameLabel = "名称"
+    static let amountLabel = "金额"
+    static let currencyFieldLabel = "币种"
+    static let cycleFieldLabel = "扣费周期"
+    static let nextChargeDateLabel = "下次扣费日"
+    static let categoryLabel = "分类"
+    static let assetLabel = "资产"
+    static let currentBalanceLabel = "当前余额"
+    static let newBalanceLabel = "新余额"
+    static let historyTimeLabel = "记录时间"
+    static let originalAmountLabel = "原金额"
+    static let correctedAmountLabel = "修正为"
+    static let assetNamePlaceholder = "例如：招商银行 储蓄卡"
+    static let subscriptionNamePlaceholder = "例如：Netflix"
+    static let chooseDatePlaceholder = "选择日期"
+
     // MARK: 按钮
 
     static let done = "完成"
@@ -165,8 +204,10 @@ enum Copy {
     static let save = "保存"
     static let close = "关闭"
     static let add = "添加"
-    static let newSubscription = "＋ 新建订阅"
+    static let addAsset = "添加资产"
+    static let newSubscription = "新建订阅"
     static let correctHistory = "修正"
+    static let correctHistoryTitle = "修正历史"
     static let markRenewed = "✓ 已续费"
     static let pause = "暂停"
     static let resume = "恢复"
@@ -174,6 +215,7 @@ enum Copy {
     static let exportButton = "导出"
     static let importButton = "导入"
     static let clearButton = "清空"
+    static let clearConfirm = "清空"
     static let exportSealedButton = "导出密文"
     static let importSealedButton = "导入密文"
     static let exportRecoveryButton = "导出恢复码"
@@ -183,23 +225,33 @@ enum Copy {
     static let rename = "重命名"
     static let adjustBalance = "调整余额"
     static let editAction = "编辑"
+    static let delete = "删除"
+    static let deleteSubscription = "删除订阅"
 
     // MARK: 空状态与设置说明
 
-    static let noAssetRecords = "还没有记录，点击右侧「添加」记下第一笔"
-    static let compositionEmpty = "暂无资产"
+    static let overviewEmptyTitle = "还没有记录"
+    static let overviewEmptyHelp = "记下第一笔资产，净资产会显示在这里"
+    static let assetsEmptyTitle = "还没有资产"
+    static let assetsEmptyHelp = "现金、房产、投资、借出和欠款都可以记"
     static let noSubscriptions = "还没有订阅"
     static let noSubscriptionsHelp = "记下常用服务，随时知道接下来要扣多少钱"
     static let noCharges = "暂无扣费"
-    static let noUpcomingCharges = "未来 30 天没有待扣费用"
-    static let themeHelp = "跟随系统会自动匹配电脑的深浅色。"
+    static let noUpcomingCharges = "未来 30 天没有扣费"
+    static let themeHelp = "「自动」会跟随系统的深浅色。"
+    static let exportBackupTitle = "导出备份"
     static let exportBackupHelp = "保存为 JSON 文件，可随时导入恢复。"
+    static let importBackupTitle = "导入备份"
     static let importBackupHelp = "会覆盖当前所有记录，请先导出备份。"
+    static let clearAllTitle = "清空全部数据"
     static let clearAllHelp = "删除本机上的全部资产与订阅记录。"
+    static let encryptedBackupTitle = "加密备份"
     static let encryptedBackupHelp = "导出 .sfseal 密文，可安全上传网盘或发给家人。"
+    static let restoreEncryptedBackupTitle = "恢复加密备份"
     static let restoreEncryptedBackupHelp = "导入密文并覆盖当前数据；需要本机同步密钥。"
     static let keyFingerprintLabel = "同步密钥指纹"
     static let keyNotGenerated = "尚未生成"
+    static let recoveryCodeTitle = "同步密钥恢复码"
     static let recoveryCodeHelp = "换机或重装后恢复加密备份；请离线保存，不要放云盘同步目录。"
     static let aboutVersion = "SnowFold · MVP 0.1"
     static let aboutOffline = "默认离线运行 · 仅在开启同步后联网"
@@ -219,7 +271,10 @@ enum Copy {
     static let syncAccessKeyLabel = "Access Key ID"
     static let syncSecretKeyLabel = "Secret Access Key"
     static let syncUsernameLabel = "用户名"
+    // copy.md 键名 sync_password_label（占位符按原样保留）。
     static let syncPasswordLabel = "密码"
+    static let syncStorageLabel = "存储"
+    static let syncEditConfig = "修改"
     static let syncSecretReenterHelp = "密钥与密码加密保存在本机，不会显示；修改配置时需要重新输入。"
     static let syncSaveConfig = "保存配置"
     static let syncEnable = "开启同步"
@@ -290,6 +345,7 @@ enum Copy {
     static let backupExported = "备份已导出"
     static let databaseUnavailable = "数据库不可用"
     static let chooseDate = "请选择日期"
+    static let chooseNextChargeDate = "请选择下次扣费日"
     static let savedButReloadFailed = "已保存，但读取失败"
     static let notSaved = "未保存"
     static func renewed(_ periods: UInt32) -> String { "已顺延 \(periods) 期" }
@@ -312,10 +368,10 @@ enum Copy {
     static func operationFailedDetail(_ detail: String) -> String { "操作失败：\(detail)。请检查输入或数据目录后重试。" }
     static let exportTargetProtected = "不能覆盖 SnowFold 自己的数据文件，请换一个保存位置"
 
-    // MARK: 订阅编辑说明（事实板「文案修正」）
+    // MARK: 订阅编辑说明
 
     static let newSubscriptionHelp =
-        "名称与金额必填。保存后按周期计算下次扣费；到期确认续费后按周期顺延。"
+        "填写名称、金额并选择下次扣费日。到期确认续费后按周期顺延。"
 
     // MARK: 辅助功能
 

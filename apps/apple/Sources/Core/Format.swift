@@ -106,6 +106,18 @@ enum Fmt {
 
     // MARK: 统计
 
+    /// 百分比（纯显示规则，四端一致）：保留 1 位小数；正值四舍五入为 0.0% 时显示「<0.1%」。
+    static func percent(_ value: Double) -> String {
+        if value > 0, String(format: "%.1f", value) == "0.0" { return "<0.1%" }
+        return String(format: "%.1f%%", value)
+    }
+
+    /// 负债率＝总负债 ÷ 总资产 × 100；总资产为 0 时无值。
+    static func debtRatio(totalAssets: Int64, totalDebt: Int64) -> String? {
+        guard totalAssets > 0 else { return nil }
+        return percent(Double(totalDebt) / Double(totalAssets) * 100)
+    }
+
     static func weekday(of date: Date = Date()) -> String {
         let names = ["日", "一", "二", "三", "四", "五", "六"]
         let index = Calendar.current.component(.weekday, from: date) - 1
